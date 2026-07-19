@@ -1,0 +1,7 @@
+requests
+pandas
+numpy
+ta
+lxml
+python-telegram-bot==20.8
+beautifulsoup4
