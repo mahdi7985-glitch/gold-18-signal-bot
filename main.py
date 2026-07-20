@@ -9,6 +9,7 @@ from storage import append_price, load_history, trim_history
 from indicators import get_latest_indicators
 from signal_analyzer import analyze
 from telegram_notifier import send_message, TelegramSendError
+from bale_notifier import send_massage, BaleSendError
 
 
 PERSIAN_WEEKDAYS = {
@@ -79,6 +80,7 @@ def format_collecting_data_message(price: float, have: int, need: int) -> str:
 
 def run() -> None:
     config.validate_telegram_config()
+    config.validate_bale_config()
 
     # ۱. دریافت قیمت
     try:
@@ -116,6 +118,14 @@ def run() -> None:
     except TelegramSendError as exc:
         print(f"[ERROR] ارسال پیام تلگرام ناموفق بود: {exc}", file=sys.stderr)
         sys.exit(1)
+        # 5. ارسال به بله
+    try:
+        send_message(message)
+        print("[INFO] پیام با موفقیت به بله ارسال شد.")
+    except BaleSendError as exc:
+        print(f"[ERROR] ارسال پیام بله ناموفق بود: {exc}", file=sys.stderr)
+        sys.exit(1)
+
 
 
 if __name__ == "__main__":
