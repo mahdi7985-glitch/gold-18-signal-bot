@@ -112,9 +112,8 @@ def send_to_both(text: str, require_both: bool = False) -> Dict[str, bool]:
 
     if require_both and not all(results.values()):
         failed = [k for k, v in results.items() if not v]
-        raise RuntimeError(f"ارسال به همه سرویس‌ها ناموفق بود: {', '.join(failed)}")
-
-return results
+        raise RuntimeError(f"ارسال به همه سرویس‌ها ناموفق بود: {', '.join(failed)}")   
+    return results
 
 # ---------------------------------------------------------------------------
 # تابع اعتبارسنجی جامع (اختیاری)
