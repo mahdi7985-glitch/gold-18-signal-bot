@@ -1,4 +1,6 @@
 import sys
+import time
+import schedule
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import jdatetime
@@ -8,7 +10,8 @@ from gold_price_fetcher import get_gold_18k_price, PriceFetchError
 from storage import append_price, load_history, trim_history
 from indicators import get_latest_indicators
 from signal_analyzer import analyze
-from config import send_to_both  # 👈 این رو اضافه کنید
+from telegram_notifier import send_message as send_telegram
+from bale_notifier import send_message as send_bale
 
 
 PERSIAN_WEEKDAYS = {
@@ -23,13 +26,11 @@ PERSIAN_WEEKDAYS = {
 
 
 def get_tehran_jalali_now() -> jdatetime.datetime:
-    """زمان فعلی به وقت تهران، تبدیل‌شده به تاریخ شمسی."""
     now = datetime.now(ZoneInfo("Asia/Tehran"))
     return jdatetime.datetime.fromgregorian(datetime=now)
 
 
 def format_jalali_datetime(jalali: jdatetime.datetime) -> str:
-    """قالب‌بندی تاریخ/ساعت شمسی همراه با نام روز هفته فارسی (مستقل از لوکیل سیستم)."""
     weekday_name = PERSIAN_WEEKDAYS[jalali.weekday()]
     return f"{weekday_name} {jalali.strftime('%Y/%m/%d')} | 🕒 {jalali.strftime('%H:%M')}"
 
@@ -45,21 +46,22 @@ def format_full_report(price: float, row, signal) -> str:
 
     reasons_text = "\n".join(f"• {r}" for r in signal.reasons)
     jalali = get_tehran_jalali_now()
+    price_in_toman = price / 10
 
     return (
         f"<b>📊 گزارش قیمت طلای ۱۸ عیار</b>\n"
         f"📅 {format_jalali_datetime(jalali)}\n\n"
-        f"💰 قیمت لحظه‌ای: <b>{price:,.0f}</b> تومان\n\n"
+        f"💰 قیمت لحظه‌ای: <b>{price_in_toman:,.0f}</b> تومان\n\n"
         f"{trend_emoji} روند: <b>{signal.trend}</b>\n"
         f"⚡️ قدرت سیگنال: <b>{signal.strength}٪</b>\n\n"
         f"<b>اندیکاتورها:</b>\n"
-        f"• SMA({config.SMA_PERIOD}): {row['sma']:,.0f}\n"
-        f"• EMA({config.EMA_PERIOD}): {row['ema']:,.0f}\n"
+        f"• SMA({config.SMA_PERIOD}): {row['sma']/10:,.0f}\n"
+        f"• EMA({config.EMA_PERIOD}): {row['ema']/10:,.0f}\n"
         f"• RSI({config.RSI_PERIOD}): {row['rsi']:.1f}\n"
         f"• MACD: {row['macd']:.2f} | سیگنال: {row['macd_signal']:.2f}\n"
         f"• ADX({config.ADX_PERIOD}): {row['adx']:.1f}\n"
-        f"• ATR({config.ATR_PERIOD}): {row['atr']:,.0f}\n"
-        f"• باند بولینگر: {row['bb_lower']:,.0f} — {row['bb_upper']:,.0f}\n\n"
+        f"• ATR({config.ATR_PERIOD}): {row['atr']/10:,.0f}\n"
+        f"• باند بولینگر: {row['bb_lower']/10:,.0f} — {row['bb_upper']/10:,.0f}\n\n"
         f"<b>دلایل تحلیل:</b>\n{reasons_text}\n\n"
         f"<i>⚠️ این تحلیل صرفاً جنبه‌ی آموزشی/کمکی دارد و توصیه مالی نیست.</i>"
     )
@@ -67,36 +69,47 @@ def format_full_report(price: float, row, signal) -> str:
 
 def format_collecting_data_message(price: float, have: int, need: int) -> str:
     jalali = get_tehran_jalali_now()
-
     price_in_toman = price / 10
 
     return (
         f"<b>📊 قیمت طلای ۱۸ عیار</b>\n"
         f"📅 {format_jalali_datetime(jalali)}\n\n"
-        f"💰 قیمت لحظه‌ای: <b>{price:,.0f}</b> تومان\n\n"
+        f"💰 قیمت لحظه‌ای: <b>{price_in_toman:,.0f}</b> تومان\n\n"
         f"⏳ در حال جمع‌آوری داده برای تحلیل تکنیکال ({have}/{need} کندل).\n"
         f"به‌محض کافی‌شدن داده، گزارش کامل با MACD/RSI/EMA/SMA/ADX/ATR/Bollinger ارسال می‌شود."
     )
 
 
-def run() -> None:
-    # اعتبارسنجی تنظیمات (اختیاری)
-    # config.validate_all_configs(raise_on_missing=True)
+def send_to_both(message: str) -> None:
+    """ارسال پیام به هر دو سرویس تلگرام و بله"""
+    try:
+        send_telegram(message)
+        print("✅ پیام به تلگرام ارسال شد.")
+    except Exception as e:
+        print(f"❌ خطا در ارسال به تلگرام: {e}")
 
-    # ۱. دریافت قیمت
+    try:
+        send_bale(message)
+        print("✅ پیام به بله ارسال شد.")
+    except Exception as e:
+        print(f"❌ خطا در ارسال به بله: {e}")
+
+
+def fetch_and_send_report() -> None:
+    """دریافت قیمت و ارسال گزارش"""
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] شروع دریافت گزارش...")
+
     try:
         price = get_gold_18k_price()
     except PriceFetchError as exc:
         print(f"[ERROR] دریافت قیمت ناموفق بود: {exc}", file=sys.stderr)
-        sys.exit(1)
+        return
 
-    print(f"[INFO] قیمت دریافت‌شده: {price:,.0f} تومان")
+    print(f"[INFO] قیمت دریافت‌شده: {price/10:,.0f} تومان")
 
-    # ۲. ذخیره در تاریخچه
     append_price(price)
     trim_history()
 
-    # ۳. تلاش برای محاسبه اندیکاتورها
     history = load_history()
     result = get_latest_indicators(history["price"])
 
@@ -110,35 +123,34 @@ def run() -> None:
         row, _ = result
         signal = analyze(row)
         message = format_full_report(price, row, signal)
-        print(f"[INFO] روند: {signal.trend} | قدرت سیگنال: {signal.strength}٪")
+        print(f"[INFO] روند:
 
-    # ۴. ارسال به هر دو (تلگرام + بله) با یک تابع
-    results = send_to_both(message, require_both=False)  # اگر یکی fail شد، دیگری کار کنه
+{signal.trend} | قدرت سیگنال: {signal.strength}٪")
 
-    # اگر می‌خواهید حتماً هر دو موفق شوند:
-    # results = send_to_both(message, require_both=True)
+    send_to_both(message)
 
-    # بررسی نتیجه
-    if all(results.values()):
-        print("[INFO] پیام با موفقیت به هر دو سرویس ارسال شد.")
 
-    else:
-        failed = [k for k, v in results.items() if not v]
-        print(f"[WARNING] سرویس‌های ناموفق: {', '.join(failed)}")
+def run() -> None:
+    try:
+        config.validate_telegram_config()
+        config.validate_bale_config()
+    except RuntimeError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
 
-# اجرای اولیه (یک بار در شروع)
+    # اجرای اولیه
     fetch_and_send_report()
 
-    # برنامه‌ریزی برای اجرای هر 40 دقیقه
+    # برنامه‌ریزی هر 40 دقیقه (برای تست)
     schedule.every(40).minutes.do(fetch_and_send_report)
 
     print("\n✅ ربات شروع به کار کرد. هر 40 دقیقه یک بار گزارش ارسال می‌شود.")
     print("⏹️ برای متوقف کردن، Ctrl+C را بزنید.\n")
 
-    # حلقه بی‌نهایت برای اجرای برنامه‌ریزی‌ها
     while True:
         schedule.run_pending()
         time.sleep(1)
 
-if __name__ == "__main__":
+
+if name == "__main__":
     run()
