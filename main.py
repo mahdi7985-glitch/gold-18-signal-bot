@@ -9,7 +9,7 @@ from storage import append_price, load_history, trim_history
 from indicators import get_latest_indicators
 from signal_analyzer import analyze
 from telegram_notifier import send_message, TelegramSendError
-from bale_notifier import send_massage, BaleSendError
+from bale_notifier import send_message, BaleSendError
 
 
 PERSIAN_WEEKDAYS = {
