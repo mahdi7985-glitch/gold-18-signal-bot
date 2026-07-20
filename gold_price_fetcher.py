@@ -152,5 +152,5 @@ def get_gold_18k_price() -> float:
         raise PriceFetchError(f"خطا در اتصال به {GOLD_18K_URL}: {exc}") from exc
 
 
-if __name == "__main__":
+if __name__ == "__main__":
     print(get_gold_18k_price())
