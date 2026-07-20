@@ -65,7 +65,7 @@ def send_bale_message(text: str) -> bool:
         print("⚠️ بله تنظیم نشده، پیام ارسال نشد.")
         return False
 
-    url = f"https://api.bale.ai/v1/bot{BALE_BOT_TOKEN}/sendMessage"
+    url = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": BALE_CHAT_ID, "text": text, "parse_mode": "HTML"}
 
     try:
