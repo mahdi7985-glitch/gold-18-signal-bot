@@ -123,9 +123,7 @@ def fetch_and_send_report() -> None:
         row, _ = result
         signal = analyze(row)
         message = format_full_report(price, row, signal)
-        print(f"[INFO] روند:
-
-{signal.trend} | قدرت سیگنال: {signal.strength}٪")
+        print(f"[INFO] روند:{signal.trend} | قدرت سیگنال: {signal.strength}٪")
 
     send_to_both(message)
 
