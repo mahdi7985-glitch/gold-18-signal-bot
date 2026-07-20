@@ -3,7 +3,7 @@ import requests
 
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-TELEGRAM_API_URL = "https://api.telegram.org/bot8890210647:AAE_64GUSExXMA7klRvAzQVqtWvlU0L5EXw/sendMessage"
+TELEGRAM_API_URL = "https://api.telegram.org/bot{8890210647:AAE_64GUSExXMA7klRvAzQVqtWvlU0L5EXw}/sendMessage"
 
 
 class TelegramSendError(Exception):
