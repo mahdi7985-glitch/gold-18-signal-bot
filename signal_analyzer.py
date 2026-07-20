@@ -1,70 +1,117 @@
-def analyze_signal(indicators):
-    score = 0
+from dataclasses import dataclass, field
+import pandas as pd
+
+
+@dataclass
+class SignalResult:
+    trend: str  # "صعودی قوی" | "صعودی" | "خنثی" | "نزولی" | "نزولی قوی"
+    strength: int  # 0..100
+    reasons: list = field(default_factory=list)
+
+
+def _score_macd(row):
+    diff = row["macd_hist"]
+    if diff > 0 and row["macd"] > row["macd_signal"]:
+        return (2 if diff > abs(row["macd"])  0.15 else 1), "MACD بالای خط سیگنال (مومنتوم صعودی)"
+    if diff < 0 and row["macd"] < row["macd_signal"]:
+        return (-2 if abs(diff) > abs(row["macd"])  0.15 else -1), "MACD زیر خط سیگنال (مومنتوم نزولی)"
+    return 0, "MACD در وضعیت خنثی/تقاطع"
+
+
+def _score_rsi(row):
+    rsi = row["rsi"]
+    if rsi >= 70:
+        return -1, f"RSI={rsi:.1f} در محدوده اشباع خرید (احتمال اصلاح)"
+    if rsi <= 30:
+        return 1, f"RSI={rsi:.1f} در محدوده اشباع فروش (احتمال برگشت)"
+    if rsi > 55:
+        return 1, f"RSI={rsi:.1f} تمایل صعودی"
+    if rsi < 45:
+        return -1, f"RSI={rsi:.1f} تمایل نزولی"
+    return 0, f"RSI={rsi:.1f} خنثی"
+
+
+def _score_ma_cross(row):
+    price, sma, ema = row["close"], row["sma"], row["ema"]
+    if price > ema > sma:
+        return 2, "قیمت بالای EMA و EMA بالای SMA (روند صعودی)"
+    if price < ema < sma:
+        return -2, "قیمت زیر EMA و EMA زیر SMA (روند نزولی)"
+    if price > sma:
+        return 1, "قیمت بالای میانگین متحرک ساده"
+    if price < sma:
+        return -1, "قیمت زیر میانگین متحرک ساده"
+    return 0, "قیمت نزدیک میانگین‌های متحرک"
+
+
+def _score_bbands(row):
+    pct = row["bb_percent"]
+    if pct >= 1:
+        return -1, "قیمت بالای باند بالایی بولینگر (احتمال اصلاح)"
+    if pct <= 0:
+        return 1, "قیمت زیر باند پایینی بولینگر (احتمال برگشت)"
+    if pct > 0.8:
+        return -0.5, "قیمت نزدیک باند بالایی بولینگر"
+    if pct < 0.2:
+        return 0.5, "قیمت نزدیک باند پایینی بولینگر"
+    return 0, "قیمت در میانه باندهای بولینگر"
+
+
+def _adx_strength_multiplier(row):
+    adx = row["adx"]
+    if adx >= 40:
+        return 1.3, f"ADX={adx:.1f} روند بسیار قوی"
+    if adx >= 25:
+        return 1.15, f"ADX={adx:.1f} روند قابل‌اتکا"
+    if adx >= 15:
+        return 1.0, f"ADX={adx:.1f} روند متوسط"
+    return 0.7, f"ADX={adx:.1f} روند ضعیف/بدون روند مشخص"
+
+
+def _volatility_note(row):
+    atr = row["atr"]
+    atr_pct = (atr / row["close"])  100 if row["close"] else 0
+    return f"ATR={atr:,.0f} (~{atr_pct:.2f}% از قیمت) به‌عنوان معیار نوسان"
+
+
+def analyze(row) -> SignalResult:
+    """
+    ردیف آخر اندیکاتورها را گرفته و یک SignalResult (روند + قدرت + دلایل)
+    برمی‌گرداند.
+    """
     reasons = []
+    total_score = 0.0
+    max_possible = 0.0
 
-    # RSI
-    rsi = indicators.get("RSI", 50)
-    if rsi < 30:
-        score += 2
-        reasons.append("RSI اشباع فروش")
-    elif rsi > 70:
-        score -= 2
-        reasons.append("RSI اشباع خرید")
+    for score_fn, weight in (
+        (_score_macd, 2),
+        (_score_rsi, 1.5),
+        (_score_ma_cross, 2),
+        (_score_bbands, 1),
+    ):
+        score, reason = score_fn(row)
+        total_score += score  weight
+        max_possible += 2  weight
+        reasons.append(reason)
 
-    # MACD
-    macd = indicators.get("MACD", 0)
-    macd_signal = indicators.get("MACD_SIGNAL", 0)
+    multiplier, adx_reason = _adx_strength_multiplier(row)
+    reasons.append(adx_reason)
+    reasons.append(_volatility_note(row))
 
-    if macd > macd_signal:
-        score += 2
-        reasons.append("تقاطع صعودی MACD")
+    total_score = multiplier
+
+    normalized = max(-1.0, min(1.0, total_score / max_possible)) if max_possible else 0.0
+    strength = round(abs(normalized) * 100)
+
+    if normalized >= 0.5:
+        trend = "صعودی قوی"
+    elif normalized >= 0.15:
+        trend = "صعودی"
+    elif normalized <= -0.5:
+        trend = "نزولی قوی"
+    elif normalized <= -0.15:
+        trend = "نزولی"
     else:
-        score -= 2
-        reasons.append("تقاطع نزولی MACD")
+        trend = "خنثی"
 
-    # EMA
-    ema20 = indicators.get("EMA20", 0)
-    ema50 = indicators.get("EMA50", 0)
-
-    if ema20 > ema50:
-        score += 1
-        reasons.append("EMA20 بالای EMA50")
-    else:
-        score -= 1
-        reasons.append("EMA20 پایین EMA50")
-
-    # ADX
-    adx = indicators.get("ADX", 0)
-    if adx > 25:
-        score += 1
-        reasons.append("روند قوی")
-
-    # Bollinger Bands
-    close = indicators.get("CLOSE", 0)
-    upper = indicators.get("BB_UPPER", 0)
-    lower = indicators.get("BB_LOWER", 0)
-
-    if lower and close < lower:
-        score += 1
-        reasons.append("زیر باند پایینی بولینگر")
-    elif upper and close > upper:
-        score -= 1
-        reasons.append("بالای باند بالایی بولینگر")
-
-    # نتیجه نهایی
-    if score >= 4:
-        signal = "🟢 خرید قوی"
-    elif score >= 2:
-        signal = "🟢 خرید"
-    elif score <= -4:
-        signal = "🔴 فروش قوی"
-    elif score <= -2:
-        signal = "🔴 فروش"
-    else:
-        signal = "🟡 خنثی"
-
-    return {
-        "signal": signal,
-        "score": score,
-        "reasons": reasons
-    }
+    return SignalResult(trend=trend, strength=strength, reasons=reasons)
