@@ -37,15 +37,3 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
-
-      - name: Commit updated price history
-        if: always()
-        run: |
-          git config user.name "gold-signal-bot"
-          git config user.email "actions@users.noreply.github.com"
-          if [ -f data/price_history.csv ]; then
-            git add data/price_history.csv
-            git diff --cached --quiet && echo "تغییری برای commit وجود ندارد" || git commit -m "chore: update gold price history [skip ci]"
-            git push
-          else
-            echo "فایل price_history.csv پیدا نشد - مرحله قبلی احتمالا با خطا مواجه شده"
