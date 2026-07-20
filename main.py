@@ -118,9 +118,8 @@ def run() -> None:
 
     # بررسی نتیجه
     if all(results.values()):
-        print("[INFO] پیام با موفقیت به هر دو سرویس
+        print("[INFO] پیام با موفقیت به هر دو سرویس ارسال شد.")
 
-ارسال شد.")
     else:
         failed = [k for k, v in results.items() if not v]
         print(f"[WARNING] سرویس‌های ناموفق: {', '.join(failed)}")
