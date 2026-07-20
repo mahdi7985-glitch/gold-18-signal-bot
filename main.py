@@ -104,7 +104,7 @@ def run() -> None:
             price, candles_count, config.MIN_CANDLES_REQUIRED
         )
     else:
-        row, = result
+        row, _ = result
         signal = analyze(row)
         message = format_full_report(price, row, signal)
         print(f"[INFO] روند: {signal.trend} | قدرت سیگنال: {signal.strength}٪")
@@ -118,5 +118,5 @@ def run() -> None:
         sys.exit(1)
 
 
-if name == "__main__":
+if __name__ == "__main__":
     run()
