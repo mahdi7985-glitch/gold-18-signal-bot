@@ -90,7 +90,7 @@ def run() -> None:
         print(f"[ERROR] دریافت قیمت ناموفق بود: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[INFO] قیمت دریافت‌شده: {price/10:,.0f} تومان")
+    print(f"[INFO] قیمت دریافت‌شده: {price:,.0f} تومان")
 
     # ۲. ذخیره در تاریخچه
     append_price(price)
