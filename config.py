@@ -48,3 +48,20 @@ def validate_telegram_config() -> None:
         raise RuntimeError(
             "متغیرهای محیطی زیر تنظیم نشده‌اند: " + ", ".join(missing)
         )
+
+# ---------------------------------------------------------------------------
+# بله
+# ---------------------------------------------------------------------------
+BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN", "")
+BALE_CHAT_ID = os.getenv("BALE_CHAT_ID", "")
+def validate_bale_config() -> None:
+    """بررسی می‌کند که توکن و چت‌آیدی بله تنظیم شده باشند."""
+    missing = []
+    if not BALE_BOT_TOKEN:
+        missing.append("BALE_BOT_TOKEN")
+    if not BALE_CHAT_ID:
+        missing.append("BALE_CHAT_ID")
+    if missing:
+        raise RuntimeError(
+            "متغیرهای محیطی زیر تنظیم نشده‌اند: " + ", ".join(missing)
+        )
