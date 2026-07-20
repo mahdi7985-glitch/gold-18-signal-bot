@@ -68,6 +68,8 @@ def format_full_report(price: float, row, signal) -> str:
 def format_collecting_data_message(price: float, have: int, need: int) -> str:
     jalali = get_tehran_jalali_now()
 
+    price_in_toman = price / 10
+
     return (
         f"<b>📊 قیمت طلای ۱۸ عیار</b>\n"
         f"📅 {format_jalali_datetime(jalali)}\n\n"
