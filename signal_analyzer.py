@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from operator import mul
 import pandas as pd
 
 
@@ -11,7 +12,7 @@ class SignalResult:
 
 def _score_macd(row):
     diff = row["macd_hist"]
-    threshold = abs(row["macd"])  0.15
+    threshold = mul(abs(row["macd"]), 0.15)
     if diff > 0 and row["macd"] > row["macd_signal"]:
         return (2 if diff > threshold else 1), "MACD بالای خط سیگنال (مومنتوم صعودی)"
     if diff < 0 and row["macd"] < row["macd_signal"]:
@@ -71,7 +72,8 @@ def _adx_strength_multiplier(row):
 
 def _volatility_note(row):
     atr = row["atr"]
-    atr_pct = (atr / row["close"])  100 if row["close"] else 0
+    ratio = atr / row["close"] if row["close"] else 0
+    atr_pct = mul(ratio, 100)
     return f"ATR={atr:,.0f} (~{atr_pct:.2f}% از قیمت) به‌عنوان معیار نوسان"
 
 
@@ -87,18 +89,18 @@ def analyze(row) -> SignalResult:
         (_score_bbands, 1),
     ):
         score, reason = score_fn(row)
-        total_score += score  weight
-        max_possible += 2  weight
+        total_score = total_score + mul(score, weight)
+        max_possible = max_possible + mul(2, weight)
         reasons.append(reason)
 
     multiplier, adx_reason = _adx_strength_multiplier(row)
     reasons.append(adx_reason)
     reasons.append(_volatility_note(row))
 
-    total_score = total_score  multiplier
+    total_score = mul(total_score, multiplier)
 
     normalized = max(-1.0, min(1.0, total_score / max_possible)) if max_possible else 0.0
-    strength = round(abs(normalized)  100)
+    strength = round(mul(abs(normalized), 100))
 
     if normalized >= 0.5:
         trend = "صعودی قوی"
