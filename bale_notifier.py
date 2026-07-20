@@ -1,15 +1,14 @@
+import os
 import requests
 
-from config import BALE_BOT_TOKEN, BALE_CHAT_ID
-
-BALE_API_URL = "https://tapi.bale.ai/bot{token}/sendMessage"
-
+BALE_API_URL = "https://api.bale.ai/v1/bots/{token}/sendMessage"
+BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
+BALE_CHAT_ID = os.getenv("BALE_CHAT_ID")
 
 class BaleSendError(Exception):
     pass
 
-    
-    def send_message(text: str, parse_mode: str = "HTML") -> None:
+def send_message(text: str, parse_mode: str = "HTML") -> None:
     """پیام را به chat_id تنظیم‌شده در تنظیمات ارسال می‌کند."""
     url = BALE_API_URL.format(token=BALE_BOT_TOKEN)
     payload = {
@@ -18,13 +17,9 @@ class BaleSendError(Exception):
         "parse_mode": parse_mode,
         "disable_web_page_preview": True,
     }
-
     try:
-        response = requests.post(url, json=payload, timeout=15)
-    except requests.RequestException as exc:
-        raise BaleSendError(f"خطا در اتصال به بله: {exc}") from exc
-
-    if not response.ok:
-        raise BaleSendError(
-            f"بله خطا برگرداند ({response.status_code}): {response.text}"
-        )
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise BaleSendError(f"خطا در ارسال پیام به Bale: {e}")
