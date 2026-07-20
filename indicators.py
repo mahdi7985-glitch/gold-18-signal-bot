@@ -1,14 +1,4 @@
 
-indicators.py
--------------
-داده‌ی خام قیمت (یک عدد هر ۵ دقیقه) ابتدا به کندل‌های OHLC تبدیل می‌شود
-(resample) تا اندیکاتورهایی مثل ADX و ATR که به High/Low/Close نیاز دارند
-قابل‌محاسبه باشند. سپس با استفاده از کتابخانه‌ی `ta`، اندیکاتورهای زیر
-محاسبه می‌شوند:
-
-    SMA, EMA, RSI, MACD, Bollinger Bands, ADX, ATR
-"""
-
 import pandas as pd
 from ta.trend import SMAIndicator, EMAIndicator, MACD, ADXIndicator
 from ta.momentum import RSIIndicator
