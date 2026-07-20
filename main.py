@@ -1,1 +1,109 @@
 
+main.py
+-------
+نقطه‌ی ورود اصلی پروژه. این اسکریپت هر بار که اجرا می‌شود (هر ۵ دقیقه توسط
+GitHub Actions):
+
+    ۱. قیمت لحظه‌ای طلای ۱۸ عیار را می‌گیرد
+    ۲. آن را به تاریخچه (CSV) اضافه می‌کند
+    ۳. اگر داده‌ی کافی برای محاسبه اندیکاتورها جمع شده باشد:
+         - اندیکاتورهای MACD/RSI/EMA/SMA/ADX/ATR/Bollinger را محاسبه می‌کند
+         - روند و قدرت سیگنال را تحلیل می‌کند
+         - پیام کامل تحلیلی به تلگرام ارسال می‌کند
+       در غیر این صورت، فقط قیمت را به‌همراه یک پیام "در حال جمع‌آوری داده" ارسال می‌کند.
+"""
+
+import sys
+from datetime import datetime, timezone
+
+import config
+from gold_price_fetcher import get_gold_18k_price, PriceFetchError
+from storage import append_price, load_history, trim_history
+from indicators import get_latest_indicators
+from signal_analyzer import analyze
+from telegram_notifier import send_message, TelegramSendError
+
+
+def format_full_report(price: float, row, signal) -> str:
+    trend_emoji = {
+        "صعودی قوی": "🟢🟢",
+        "صعودی": "🟢",
+        "خنثی": "🟡",
+        "نزولی": "🔴",
+        "نزولی قوی": "🔴🔴",
+    }.get(signal.trend, "⚪️")
+
+    reasons_text = "\n".join(f"• {r}" for r in signal.reasons)
+
+    return (
+        f"<b>📊 گزارش قیمت طلای ۱۸ عیار</b>\n"
+        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        f"💰 قیمت لحظه‌ای: <b>{price:,.0f}</b> تومان\n\n"
+        f"{trend_emoji} روند: <b>{signal.trend}</b>\n"
+        f"⚡️ قدرت سیگنال: <b>{signal.strength}٪</b>\n\n"
+        f"<b>اندیکاتورها:</b>\n"
+        f"• SMA({config.SMA_PERIOD}): {row['sma']:,.0f}\n"
+        f"• EMA({config.EMA_PERIOD}): {row['ema']:,.0f}\n"
+        f"• RSI({config.RSI_PERIOD}): {row['rsi']:.1f}\n"
+        f"• MACD: {row['macd']:.2f} | سیگنال: {row['macd_signal']:.2f}\n"
+        f"• ADX({config.ADX_PERIOD}): {row['adx']:.1f}\n"
+        f"• ATR({config.ATR_PERIOD}): {row['atr']:,.0f}\n"
+        f"• باند بولینگر: {row['bb_lower']:,.0f} — {row['bb_upper']:,.0f}\n\n"
+        f"<b>دلایل تحلیل:</b>\n{reasons_text}\n\n"
+        f"<i>⚠️ این تحلیل صرفاً جنبه‌ی آموزشی/کمکی دارد و توصیه مالی نیست.</i>"
+    )
+
+
+def format_collecting_data_message(price: float, have: int, need: int) -> str:
+    return (
+        f"<b>📊 قیمت طلای ۱۸ عیار</b>\n"
+        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        f"💰 قیمت لحظه‌ای: <b>{price:,.0f}</b> تومان\n\n"
+        f"⏳ در حال جمع‌آوری داده برای تحلیل تکنیکال ({have}/{need} کندل).\n"
+        f"به‌محض کافی‌شدن داده، گزارش کامل با MACD/RSI/EMA/SMA/ADX/ATR/Bollinger ارسال می‌شود."
+    )
+
+
+def run() -> None:
+    config.validate_telegram_config()
+
+    # ۱. دریافت قیمت
+    try:
+        price = get_gold_18k_price()
+    except PriceFetchError as exc:
+        print(f"[ERROR] دریافت قیمت ناموفق بود: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[INFO] قیمت دریافت‌شده: {price:,.0f} تومان")
+
+    # ۲. ذخیره در تاریخچه
+    append_price(price)
+    trim_history()
+
+    # ۳. تلاش برای محاسبه اندیکاتورها
+    history = load_history()
+    result = get_latest_indicators(history["price"])
+
+    if result is None:
+        from indicators import build_ohlc_candles
+        candles_count = len(build_ohlc_candles(history["price"]))
+        message = format_collecting_data_message(
+            price, candles_count, config.MIN_CANDLES_REQUIRED
+        )
+    else:
+        row,  = result
+        signal = analyze(row)
+        message = format_full_report(price, row, signal)
+        print(f"[INFO] روند: {signal.trend} | قدرت سیگنال: {signal.strength}٪")
+
+    # ۴. ارسال به تلگرام
+    try:
+        send_message(message)
+        print("[INFO] پیام با موفقیت به تلگرام ارسال شد.")
+    except TelegramSendError as exc:
+        print(f"[ERROR] ارسال پیام تلگرام ناموفق بود: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+if _name == "__main__":
+    run()
