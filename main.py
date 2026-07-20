@@ -91,5 +91,5 @@ def run() -> None:
         sys.exit(1)
 
 
-if _name == "__main__":
+if __name__ == "__main__":
     run()
