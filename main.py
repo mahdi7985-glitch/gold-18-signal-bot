@@ -8,8 +8,7 @@ from gold_price_fetcher import get_gold_18k_price, PriceFetchError
 from storage import append_price, load_history, trim_history
 from indicators import get_latest_indicators
 from signal_analyzer import analyze
-from telegram_notifier import send_message, TelegramSendError
-from bale_notifier import send_message, BaleSendError
+from config import send_to_both  # 👈 این رو اضافه کنید
 
 
 PERSIAN_WEEKDAYS = {
@@ -79,8 +78,8 @@ def format_collecting_data_message(price: float, have: int, need: int) -> str:
 
 
 def run() -> None:
-    config.validate_telegram_config()
-    config.validate_bale_config()
+    # اعتبارسنجی تنظیمات (اختیاری)
+    # config.validate_all_configs(raise_on_missing=True)
 
     # ۱. دریافت قیمت
     try:
@@ -111,22 +110,21 @@ def run() -> None:
         message = format_full_report(price, row, signal)
         print(f"[INFO] روند: {signal.trend} | قدرت سیگنال: {signal.strength}٪")
 
-    # ۴. ارسال به تلگرام
-    try:
-        send_message(message)
-        print("[INFO] پیام با موفقیت به تلگرام ارسال شد.")
-    except TelegramSendError as exc:
-        print(f"[ERROR] ارسال پیام تلگرام ناموفق بود: {exc}", file=sys.stderr)
-        sys.exit(1)
-        # 5. ارسال به بله
-    try:
-        send_message(message)
-        print("[INFO] پیام با موفقیت به بله ارسال شد.")
-    except BaleSendError as exc:
-        print(f"[ERROR] ارسال پیام بله ناموفق بود: {exc}", file=sys.stderr)
-        sys.exit(1)
+    # ۴. ارسال به هر دو (تلگرام + بله) با یک تابع
+    results = send_to_both(message, require_both=False)  # اگر یکی fail شد، دیگری کار کنه
+
+    # اگر می‌خواهید حتماً هر دو موفق شوند:
+    # results = send_to_both(message, require_both=True)
+
+    # بررسی نتیجه
+    if all(results.values()):
+        print("[INFO] پیام با موفقیت به هر دو سرویس
+
+ارسال شد.")
+    else:
+        failed = [k for k, v in results.items() if not v]
+        print(f"[WARNING] سرویس‌های ناموفق: {', '.join(failed)}")
 
 
-
-if __name__ == "__main__":
+if name == "__main__":
     run()
