@@ -15,6 +15,8 @@ def send_message(text: str) -> None:
     payload = {
         "chat_id": BALE_CHAT_ID,
         "text": text,
+        "parse_mode": parse_mode,
+        "disable_web_page_preview": True,
     }
 
     try:
