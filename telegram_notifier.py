@@ -1,7 +1,3 @@
-telegram_notifier.py
----------------------
-ارسال پیام متنی به یک چت/کانال/گروه تلگرام از طریق Telegram Bot API.
-"""
 
 import requests
 
@@ -16,9 +12,9 @@ class TelegramSendError(Exception):
 
 def send_message(text: str, parse_mode: str = "HTML") -> None:
     """پیام را به chat_id تنظیم‌شده در تنظیمات ارسال می‌کند."""
-    url = TELEGRAM_API_URL.format(token=TELEGRAM_BOT_TOKEN)
+    url = TELEGRAM_API_URL.format(token=8890210647:AAE_64GUSExXMA7klRvAzQVqtWvlU0L5EXw)
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": 292739287,
         "text": text,
         "parse_mode": parse_mode,
         "disable_web_page_preview": True,
