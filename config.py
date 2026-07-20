@@ -23,7 +23,7 @@ HISTORY_FILE = os.path.join(DATA_DIR, "price_history.csv")
 # تحلیل تکنیکال
 # ---------------------------------------------------------------------------
 RESAMPLE_RULE = os.getenv("RESAMPLE_RULE", "15min")
-MIN_CANDLES_REQUIRED = int(os.getenv("MIN_CANDLES_REQUIRED", "35"))
+MIN_CANDLES_REQUIRED = int(os.getenv("MIN_CANDLES_REQUIRED", "1"))
 
 SMA_PERIOD = int(os.getenv("SMA_PERIOD", "20"))
 EMA_PERIOD = int(os.getenv("EMA_PERIOD", "20"))
