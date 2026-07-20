@@ -125,5 +125,5 @@ def run() -> None:
         print(f"[WARNING] سرویس‌های ناموفق: {', '.join(failed)}")
 
 
-if name == "__main__":
+if __name__ == "__main__":
     run()
