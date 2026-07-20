@@ -4,17 +4,18 @@ import pandas as pd
 
 @dataclass
 class SignalResult:
-    trend: str  # "صعودی قوی" | "صعودی" | "خنثی" | "نزولی" | "نزولی قوی"
-    strength: int  # 0..100
+    trend: str
+    strength: int
     reasons: list = field(default_factory=list)
 
 
 def _score_macd(row):
     diff = row["macd_hist"]
+    threshold = abs(row["macd"])  0.15
     if diff > 0 and row["macd"] > row["macd_signal"]:
-        return (2 if diff > abs(row["macd"])  0.15 else 1), "MACD بالای خط سیگنال (مومنتوم صعودی)"
+        return (2 if diff > threshold else 1), "MACD بالای خط سیگنال (مومنتوم صعودی)"
     if diff < 0 and row["macd"] < row["macd_signal"]:
-        return (-2 if abs(diff) > abs(row["macd"])  0.15 else -1), "MACD زیر خط سیگنال (مومنتوم نزولی)"
+        return (-2 if abs(diff) > threshold else -1), "MACD زیر خط سیگنال (مومنتوم نزولی)"
     return 0, "MACD در وضعیت خنثی/تقاطع"
 
 
@@ -75,10 +76,6 @@ def _volatility_note(row):
 
 
 def analyze(row) -> SignalResult:
-    """
-    ردیف آخر اندیکاتورها را گرفته و یک SignalResult (روند + قدرت + دلایل)
-    برمی‌گرداند.
-    """
     reasons = []
     total_score = 0.0
     max_possible = 0.0
@@ -98,10 +95,10 @@ def analyze(row) -> SignalResult:
     reasons.append(adx_reason)
     reasons.append(_volatility_note(row))
 
-    total_score = multiplier
+    total_score = total_score  multiplier
 
     normalized = max(-1.0, min(1.0, total_score / max_possible)) if max_possible else 0.0
-    strength = round(abs(normalized) * 100)
+    strength = round(abs(normalized)  100)
 
     if normalized >= 0.5:
         trend = "صعودی قوی"
