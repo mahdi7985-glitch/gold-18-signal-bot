@@ -8,9 +8,9 @@ BALE_API_URL = "https://tapi.bale.ai/bot{token}/sendMessage"
 class BaleSendError(Exception):
     pass
 
-
-def send_message(text: str) -> None:
-    """پیام را به chat_id تنظیم‌شده در بله ارسال می‌کند."""
+    
+    def send_message(text: str, parse_mode: str = "HTML") -> None:
+    """پیام را به chat_id تنظیم‌شده در تنظیمات ارسال می‌کند."""
     url = BALE_API_URL.format(token=BALE_BOT_TOKEN)
     payload = {
         "chat_id": BALE_CHAT_ID,
