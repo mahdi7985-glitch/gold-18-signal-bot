@@ -12,7 +12,7 @@ class TelegramSendError(Exception):
 
 def send_message(text: str, parse_mode: str = "HTML") -> None:
     """پیام را به chat_id تنظیم‌شده در تنظیمات ارسال می‌کند."""
-    url = TELEGRAM_API_URL.format(token=8890210647:AAE_64GUSExXMA7klRvAzQVqtWvlU0L5EXw)
+    url = TELEGRAM_API_URL.format(token={8890210647:AAE_64GUSExXMA7klRvAzQVqtWvlU0L5EXw})
     payload = {
         "chat_id": 292739287,
         "text": text,
