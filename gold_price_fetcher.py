@@ -35,7 +35,7 @@ def _parse_price_text(text: str) -> float:
 
 def _fetch_from_tgju() -> float:
     """قیمت طلای ۱۸ عیار را از صفحه‌ی tgju.org استخراج می‌کند."""
-    response = requests.get(GOLD_18K_URL, headers=_HEADERS, timeout=15)
+    response = requests.get(GOLD_18K_URL, headers=HEADERS, timeout=15)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
 
