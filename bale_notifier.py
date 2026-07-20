@@ -1,7 +1,7 @@
 import os
 import requests
 
-BALE_API_URL = "https://api.bale.ai/v1/bots/{token}/sendMessage"
+BALE_API_URL = "https://tapi.bale.ai/bot{token}/sendMessage"
 BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
 BALE_CHAT_ID = os.getenv("BALE_CHAT_ID")
 
