@@ -1,6 +1,4 @@
 import sys
-import time
-import schedule
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import jdatetime
@@ -135,20 +133,6 @@ def run() -> None:
     except RuntimeError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         sys.exit(1)
-
-    # اجرای اولیه
-    fetch_and_send_report()
-
-    # برنامه‌ریزی هر 40 دقیقه (برای تست)
-    schedule.every(40).minutes.do(fetch_and_send_report)
-
-    print("\n✅ ربات شروع به کار کرد. هر 40 دقیقه یک بار گزارش ارسال می‌شود.")
-    print("⏹️ برای متوقف کردن، Ctrl+C را بزنید.\n")
-
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
-
 
 if name == "__main__":
     run()
