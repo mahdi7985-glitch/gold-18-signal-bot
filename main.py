@@ -1,6 +1,7 @@
-
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import jdatetime
 
 import config
 from gold_price_fetcher import get_gold_18k_price, PriceFetchError
@@ -8,6 +9,29 @@ from storage import append_price, load_history, trim_history
 from indicators import get_latest_indicators
 from signal_analyzer import analyze
 from telegram_notifier import send_message, TelegramSendError
+
+
+PERSIAN_WEEKDAYS = {
+    0: "دوشنبه",
+    1: "سه‌شنبه",
+    2: "چهارشنبه",
+    3: "پنجشنبه",
+    4: "جمعه",
+    5: "شنبه",
+    6: "یکشنبه",
+}
+
+
+def get_tehran_jalali_now() -> jdatetime.datetime:
+    """زمان فعلی به وقت تهران، تبدیل‌شده به تاریخ شمسی."""
+    now = datetime.now(ZoneInfo("Asia/Tehran"))
+    return jdatetime.datetime.fromgregorian(datetime=now)
+
+
+def format_jalali_datetime(jalali: jdatetime.datetime) -> str:
+    """قالب‌بندی تاریخ/ساعت شمسی همراه با نام روز هفته فارسی (مستقل از لوکیل سیستم)."""
+    weekday_name = PERSIAN_WEEKDAYS[jalali.weekday()]
+    return f"{weekday_name} {jalali.strftime('%Y/%m/%d')} | 🕒 {jalali.strftime('%H:%M')}"
 
 
 def format_full_report(price: float, row, signal) -> str:
@@ -20,10 +44,11 @@ def format_full_report(price: float, row, signal) -> str:
     }.get(signal.trend, "⚪️")
 
     reasons_text = "\n".join(f"• {r}" for r in signal.reasons)
+    jalali = get_tehran_jalali_now()
 
     return (
         f"<b>📊 گزارش قیمت طلای ۱۸ عیار</b>\n"
-        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        f"📅 {format_jalali_datetime(jalali)}\n\n"
         f"💰 قیمت لحظه‌ای: <b>{price:,.0f}</b> تومان\n\n"
         f"{trend_emoji} روند: <b>{signal.trend}</b>\n"
         f"⚡️ قدرت سیگنال: <b>{signal.strength}٪</b>\n\n"
@@ -41,9 +66,11 @@ def format_full_report(price: float, row, signal) -> str:
 
 
 def format_collecting_data_message(price: float, have: int, need: int) -> str:
+    jalali = get_tehran_jalali_now()
+
     return (
         f"<b>📊 قیمت طلای ۱۸ عیار</b>\n"
-        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        f"📅 {format_jalali_datetime(jalali)}\n\n"
         f"💰 قیمت لحظه‌ای: <b>{price:,.0f}</b> تومان\n\n"
         f"⏳ در حال جمع‌آوری داده برای تحلیل تکنیکال ({have}/{need} کندل).\n"
         f"به‌محض کافی‌شدن داده، گزارش کامل با MACD/RSI/EMA/SMA/ADX/ATR/Bollinger ارسال می‌شود."
@@ -77,7 +104,7 @@ def run() -> None:
             price, candles_count, config.MIN_CANDLES_REQUIRED
         )
     else:
-        row,  = result
+        row, = result
         signal = analyze(row)
         message = format_full_report(price, row, signal)
         print(f"[INFO] روند: {signal.trend} | قدرت سیگنال: {signal.strength}٪")
@@ -91,5 +118,5 @@ def run() -> None:
         sys.exit(1)
 
 
-if __name__ == "__main__":
+if name == "__main__":
     run()
