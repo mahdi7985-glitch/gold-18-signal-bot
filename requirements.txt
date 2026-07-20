@@ -1,7 +1,4 @@
-requests
-pandas
-numpy
-ta
-lxml
-python-telegram-bot==20.8
-beautifulsoup4
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+pandas>=2.1.0
+ta>=0.11.0
