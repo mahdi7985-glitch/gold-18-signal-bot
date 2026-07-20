@@ -126,6 +126,19 @@ def run() -> None:
         failed = [k for k, v in results.items() if not v]
         print(f"[WARNING] سرویس‌های ناموفق: {', '.join(failed)}")
 
+# اجرای اولیه (یک بار در شروع)
+    fetch_and_send_report()
+
+    # برنامه‌ریزی برای اجرای هر 40 دقیقه
+    schedule.every(40).minutes.do(fetch_and_send_report)
+
+    print("\n✅ ربات شروع به کار کرد. هر 40 دقیقه یک بار گزارش ارسال می‌شود.")
+    print("⏹️ برای متوقف کردن، Ctrl+C را بزنید.\n")
+
+    # حلقه بی‌نهایت برای اجرای برنامه‌ریزی‌ها
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
 
 if __name__ == "__main__":
     run()
