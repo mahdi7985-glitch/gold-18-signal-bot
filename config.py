@@ -1,6 +1,6 @@
 import os
 import requests
-from typing import Dict, bool as BoolType
+from typing import Dict
 
 # ---------------------------------------------------------------------------
 # تلگرام
@@ -114,7 +114,7 @@ def send_to_both(text: str, require_both: bool = False) -> Dict[str, bool]:
         failed = [k for k, v in results.items() if not v]
         raise RuntimeError(f"ارسال به همه سرویس‌ها ناموفق بود: {', '.join(failed)}")
 
-    return results
+return results
 
 # ---------------------------------------------------------------------------
 # تابع اعتبارسنجی جامع (اختیاری)
@@ -162,19 +162,3 @@ BBANDS_PERIOD = int(os.getenv("BBANDS_PERIOD", "20"))
 BBANDS_STD = float(os.getenv("BBANDS_STD", "2"))
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", "14"))
 ATR_PERIOD = int(os.getenv("ATR_PERIOD", "14"))
-
-# ---------------------------------------------------------------------------
-# مثال استفاده
-# ---------------------------------------------------------------------------
-if name == "__main__":
-    # روش اول: فقط اعتبارسنجی (بدون ارسال)
-    # validate_all_configs(raise_on_missing=True)
-
-    # روش دوم: ارسال پیام به هر دو
-    send_to_both("سلام! این پیام آزمایشی از ربات است.", require_both=False)
-
-    # روش سوم: اگر می‌خواهید حتماً هر دو تنظیم شده باشند
-    # وگرنه برنامه متوقف شود:
-    # validate_all_configs(raise_on_missing=True)
-    # send_to_both("پیام مهم!", require_both=True)
-        
