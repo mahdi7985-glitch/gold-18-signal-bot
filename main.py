@@ -134,5 +134,8 @@ def run() -> None:
         print(f"[ERROR] {e}", file=sys.stderr)
         sys.exit(1)
 
-if __name__ == "__main__":
+    fetch_and_send_report()
+
+
+if name == "__main__":
     run()
