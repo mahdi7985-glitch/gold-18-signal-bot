@@ -137,5 +137,5 @@ def run() -> None:
     fetch_and_send_report()
 
 
-if name == "__main__":
+if __name__ == "__main__":
     run()
