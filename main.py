@@ -1,23 +1,19 @@
 import sys
 from datetime import datetime
-import jdatetime
 from typing import Optional, Dict, Any
 import pandas as pd
 
 from config import (
     EMA_FAST, EMA_SLOW, RSI_LENGTH, MACD_FAST, MACD_SLOW, MACD_SIGNAL, ADX_LENGTH,
-    RSI_OVERBOUGHT, RSI_OVERSOLD, ADX_THRESHOLD
+    RSI_OVERBOUGHT, RSI_OVERSOLD, ADX_THRESHOLD, MIN_CANDLES_REQUIRED,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BALE_BOT_TOKEN, BALE_CHAT_ID
 )
 from gold_price_fetcher import get_gold_18k_price, PriceFetchError
-from storage import append_price, load_history, trim_history, get_previous_price
-from indicators import get_latest_analysis
-from notifier import (
-    send_to_both, 
-    get_iran_time, 
-    get_iran_day,
-    IRAN_TZ
-)
+from storage import append_price, load_history, trim_history, get_previous_price, save_signal
+from indicators import get_latest_analysis, build_ohlc_candles
 from signal_analyzer import analyze
+from telegram_notifier import send_telegram_message
+from bale_notifier import send_bale_message
 
 
 # ============================================
@@ -38,6 +34,7 @@ def get_jalali_now():
     """دریافت تاریخ و زمان جلالی با منطقه زمانی ایران"""
     from datetime import datetime as dt
     from zoneinfo import ZoneInfo
+    import jdatetime
     now = dt.now(ZoneInfo("Asia/Tehran"))
     return jdatetime.datetime.fromgregorian(datetime=now)
 
@@ -48,8 +45,48 @@ def format_jalali_datetime(jalali) -> str:
     return f"{weekday_name} {jalali.strftime('%Y/%m/%d')} | 🕒 {jalali.strftime('%H:%M')}"
 
 
+def get_iran_day() -> str:
+    """دریافت نام روز هفته به فارسی"""
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    days = {
+        0: "دوشنبه",
+        1: "سه‌شنبه",
+        2: "چهارشنبه",
+        3: "پنجشنبه",
+        4: "جمعه",
+        5: "شنبه",
+        6: "یکشنبه"
+    }
+    now = dt.now(ZoneInfo("Asia/Tehran"))
+    return days[now.weekday()]
+
+
 # ============================================
-# تابع اصلی تولید گزارش
+# تابع ارسال به هر دو سرویس
+# ============================================
+def send_to_both(message: str, chat_id: Optional[str] = None) -> Dict[str, bool]:
+    """ارسال پیام به هر دو سرویس تلگرام و بله"""
+    results = {
+        "telegram": send_telegram_message(message, chat_id),
+        "bale": send_bale_message(message, chat_id)
+    }
+
+    success_count = sum(results.values())
+    if success_count == 2:
+        print("✅ پیام به هر دو سرویس (تلگرام و بله) ارسال شد.")
+    elif success_count == 1:
+        print("⚠️ پیام فقط به یکی از سرویس‌ها ارسال شد.")
+        failed = [k for k, v in results.items() if not v]
+        print(f"   سرویس‌های ناموفق: {', '.join(failed)}")
+    else:
+        print("❌ پیام به هیچکدام از سرویس‌ها ارسال نشد.")
+
+    return results
+
+
+# ============================================
+# تابع تولید گزارش کامل
 # ============================================
 def format_full_report(
     price: float,
@@ -223,34 +260,49 @@ def fetch_and_send_report(chat_id: Optional[str] = None) -> Dict[str, bool]:
     
     # اگر تحلیل نداریم
     if analysis_result is None or "error" in analysis_result:
-        from indicators import build_ohlc_candles
         candles_count = len(build_ohlc_candles(history["price"]))
         message = format_collecting_data_message(
             price, 
             candles_count, 
-            config.MIN_CANDLES_REQUIRED
+            MIN_CANDLES_REQUIRED
         )
-        result = send_to_both(message, chat_id, require_both=False)
+        result = send_to_both(message, chat_id)
         return result
     
     # ساخت گزارش کامل
     message = format_full_report(price, previous_price, analysis_result)
     print(f"[INFO] سیگنال: {analysis_result.get('signal', 'WAIT')} | اطمینان: {analysis_result.get('signal_confidence', 0)}%")
     
+    # ذخیره سیگنال در تاریخچه
+    try:
+        signal_data = {
+            "price": price,
+            "signal": analysis_result.get("signal", "WAIT"),
+            "signal_text": analysis_result.get("signal_text", ""),
+            "signal_confidence": analysis_result.get("signal_confidence", 0),
+            "trend": analysis_result.get("trend", ""),
+        }
+        save_signal(signal_data)
+    except Exception as e:
+        print(f"⚠️ خطا در ذخیره سیگنال: {e}")
+    
     # ارسال به هر دو
-    result = send_to_both(message, chat_id, require_both=False)
+    result = send_to_both(message, chat_id)
     return result
 
 
 def run() -> None:
     """نقطه ورود اصلی"""
-    try:
-        from config import validate_telegram_config, validate_bale_config
-        validate_telegram_config()
-        validate_bale_config()
-    except RuntimeError as e:
-        print(f"[ERROR] {e}", file=sys.stderr)
+    # بررسی تنظیمات
+    if not TELEGRAM_BOT_TOKEN and not BALE_BOT_TOKEN:
+        print("[ERROR] هیچ سرویسی (تلگرام یا بله) تنظیم نشده است!", file=sys.stderr)
         sys.exit(1)
+    
+    if TELEGRAM_BOT_TOKEN and not TELEGRAM_CHAT_ID:
+        print("[WARNING] TELEGRAM_BOT_TOKEN تنظیم شده ولی TELEGRAM_CHAT_ID خالی است!")
+    
+    if BALE_BOT_TOKEN and not BALE_CHAT_ID:
+        print("[WARNING] BALE_BOT_TOKEN تنظیم شده ولی BALE_CHAT_ID خالی است!")
 
     fetch_and_send_report()
 
