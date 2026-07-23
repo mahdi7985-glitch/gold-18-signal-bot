@@ -1,55 +1,147 @@
+# ============================================
+# GitHub Actions Workflow - Gold Signal Bot
+# تحلیل طلای ۱۸ عیار و ارسال سیگنال به تلگرام/بله
+# ============================================
+
 name: Gold Signal Bot
 
 on:
+  # اجرای خودکار هر ۴ ساعت یکبار
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '0 */4 * * *'  # هر ۴ ساعت (ساعت ۰، ۴، ۸، ۱۲، ۱۶، ۲۰ به وقت UTC)
+  
+  # اجرای دستی از داخل گیت‌هاب
   workflow_dispatch:
+    inputs:
+      chat_id:
+        description: 'ارسال به کاربر خاص (Chat ID)'
+        required: false
+        default: ''
+        type: string
+      force_run:
+        description: 'اجرای اجباری حتی با داده ناقص'
+        required: false
+        default: false
+        type: boolean
 
+# جلوگیری از اجرای همزمان چندین workflow
 concurrency:
   group: gold-signal-bot
   cancel-in-progress: false
 
+# دسترسی‌های موردنیاز
 permissions:
-  contents: write
+  contents: write  # برای commit کردن تاریخچه
+  actions: read    # برای خواندن وضعیت
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10  # افزایش زمان برای نصب کتابخانه‌ها
+    
+    env:
+      # تنظیمات پیش‌فرض
+      PYTHONUNBUFFERED: 1
+      TZ: Asia/Tehran
 
     steps:
+      # ===== ۱. دریافت کد =====
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # دریافت تمام تاریخچه برای commit
 
+      # ===== ۲. نصب Python =====
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: "pip"  # کش کردن کتابخانه‌ها برای سرعت بیشتر
 
+      # ===== ۳. نصب وابستگی‌ها =====
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          echo "📦 نصب وابستگی‌ها..."
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "✅ وابستگی‌ها نصب شدند."
 
+      # ===== ۴. ایجاد دایرکتوری داده =====
+      - name: Create data directory
+        run: mkdir -p data
+
+      # ===== ۵. اجرای ربات =====
       - name: Run gold signal bot
+        id: bot_run
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
           BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
-        run: python main.py
+          # پشتیبانی از اجرای دستی
+          MANUAL_CHAT_ID: ${{ github.event.inputs.chat_id }}
+          FORCE_RUN: ${{ github.event.inputs.force_run }}
+        run: |
+          echo "🚀 شروع اجرای ربات..."
+          echo "📅 زمان: $(date)"
+          
+          # اجرای اصلی
+          python main.py
+          
+          # ذخیره وضعیت برای مراحل بعد
+          echo "status=$?" >> $GITHUB_OUTPUT
 
+      # ===== ۶. commit تغییرات =====
       - name: Commit updated history
+        if: always()  # حتی اگر خطا هم رخ دهد، تغییرات commit شوند
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add .
-
+          
+          # اضافه کردن فایل‌های تغییر کرده
+          git add data/ || true
+          git add results/ || true
+          git add *.json || true
+          
+          # بررسی تغییرات
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "📝 هیچ تغییری برای commit وجود ندارد."
           else
-            git commit -m "Update price history"
+            echo "📝 Commit تغییرات..."
+            git commit -m "🔄 به‌روزرسانی خودکار تاریخچه قیمت و سیگنال‌ها [$(date +'%Y-%m-%d %H:%M')]"
             git push
+            echo "✅ تغییرات push شدند."
           fi
+
+      # ===== ۷. ذخیره نتایج به‌عنوان Artifact =====
+      - name: Upload results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-analysis-results
+          path: |
+            data/*.csv
+            results/*.json
+            *.json
+          retention-days: 7  # نگهداری به مدت ۷ روز
+
+      # ===== ۸. اعلان خطا (اختیاری) =====
+      - name: Notify on failure
+        if: failure() && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "⚠️ ربات با خطا مواجه شد!"
+          echo "📅 زمان: $(date)"
+          echo "🔍 برای مشاهده جزئیات به تب Actions مراجعه کنید."
+          # می‌توانید یک پیام به تلگرام ارسال کنید (در صورت تنظیم)
+
+      # ===== ۹. نمایش خلاصه اجرا =====
+      - name: Show summary
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "📊 خلاصه اجرا"
+          echo "=========================================="
+          echo "✅ زمان اجرا: $(date)"
+          echo "✅ وضعیت: ${{ job.status }}"
+          echo "✅ شماره اجرا: ${{ github.run_number }}"
+          echo "=========================================="
