@@ -1,25 +1,55 @@
 import os
 import requests
 
+from config import BALE_BOT_TOKEN, BALE_CHAT_ID
+
 BALE_API_URL = "https://tapi.bale.ai/bot{token}/sendMessage"
-BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
-BALE_CHAT_ID = os.getenv("BALE_CHAT_ID")
+
 
 class BaleSendError(Exception):
     pass
 
-def send_message(text: str, parse_mode: str = "HTML") -> None:
-    """پیام را به chat_id تنظیم‌شده در تنظیمات ارسال می‌کند."""
+
+def send_bale_message(text: str, chat_id: str = None, parse_mode: str = "HTML") -> bool:
+    """
+    ارسال پیام به بله
+    
+    Args:
+        text: متن پیام
+        chat_id: شناسه کاربر (اگر None نباشد، از تنظیمات استفاده می‌شود)
+        parse_mode: حالت پارس (HTML یا Markdown)
+    
+    Returns:
+        bool: موفقیت یا شکست
+    """
+    if not BALE_BOT_TOKEN:
+        print("⚠️ BALE_BOT_TOKEN تنظیم نشده")
+        return False
+    
+    target_chat = chat_id or BALE_CHAT_ID
+    if not target_chat:
+        print("⚠️ چت‌آیدی بله مشخص نشده")
+        return False
+    
     url = BALE_API_URL.format(token=BALE_BOT_TOKEN)
     payload = {
-        "chat_id": BALE_CHAT_ID,
+        "chat_id": target_chat,
         "text": text,
         "parse_mode": parse_mode,
-        "disable_web_page_preview": True,
     }
+
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        raise BaleSendError(f"خطا در ارسال پیام به Bale: {e}")
+        response = requests.post(url, json=payload, timeout=15)
+        if response.ok:
+            print("✅ پیام به بله ارسال شد")
+            return True
+        else:
+            print(f"❌ خطا از سمت بله: {response.text}")
+            return False
+    except requests.RequestException as exc:
+        print(f"❌ خطا در اتصال به بله: {exc}")
+        return False
+
+
+# برای سازگاری با کد قبلی
+send_message = send_bale_message
