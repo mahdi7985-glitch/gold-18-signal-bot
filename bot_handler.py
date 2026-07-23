@@ -22,10 +22,12 @@ def send_telegram(chat_id, text):
         r = requests.post(url, json={
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": "HTML"
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
         }, timeout=10)
         return r.ok
-    except:
+    except Exception as e:
+        print(f"❌ خطا در ارسال به تلگرام: {e}")
         return False
 
 
@@ -41,7 +43,8 @@ def send_bale(chat_id, text):
             "parse_mode": "HTML"
         }, timeout=10)
         return r.ok
-    except:
+    except Exception as e:
+        print(f"❌ خطا در ارسال به بله: {e}")
         return False
 
 
@@ -56,8 +59,8 @@ def get_telegram_updates(offset=0):
             data = r.json()
             if data.get("ok"):
                 return data.get("result", [])
-    except:
-        pass
+    except Exception as e:
+        print(f"❌ خطا در دریافت پیام‌های تلگرام: {e}")
     return []
 
 
@@ -72,15 +75,15 @@ def get_bale_updates(offset=0):
             data = r.json()
             if data.get("ok"):
                 return data.get("result", [])
-    except:
-        pass
+    except Exception as e:
+        print(f"❌ خطا در دریافت پیام‌های بله: {e}")
     return []
 
 
 def handle_telegram_command(chat_id, text):
     """پردازش دستورات تلگرام"""
-    # از main.py تابع fetch_and_send_report رو ایمپورت کن
-    from main import fetch_and_send_report
+    # ✅ استفاده از run به جای fetch_and_send_report
+    from main import run as run_main
     from gold_price_fetcher import get_gold_18k_price, PriceFetchError
     
     if text == "/start":
@@ -106,10 +109,13 @@ def handle_telegram_command(chat_id, text):
             send_telegram(chat_id, "❌ خطا در دریافت قیمت")
     
     elif text == "/signal":
-        send_telegram(chat_id, "🔍 در حال دریافت تحلیل...")
-        result = fetch_and_send_report(chat_id)
-        if not result.get("telegram"):
-            send_telegram(chat_id, "❌ خطا در دریافت تحلیل")
+        send_telegram(chat_id, "🔍 در حال دریافت تحلیل... لطفاً صبر کنید.")
+        try:
+            result = run_main(chat_id)  # ✅ استفاده از run_main
+            if not result.get("telegram", False):
+                send_telegram(chat_id, "❌ خطا در دریافت تحلیل. دوباره تلاش کنید.")
+        except Exception as e:
+            send_telegram(chat_id, f"❌ خطا: {str(e)[:100]}")
     
     else:
         send_telegram(chat_id, "❌ دستور نامعتبر. /help را بزنید.")
@@ -117,7 +123,8 @@ def handle_telegram_command(chat_id, text):
 
 def handle_bale_command(chat_id, text):
     """پردازش دستورات بله"""
-    from main import fetch_and_send_report
+    # ✅ استفاده از run به جای fetch_and_send_report
+    from main import run as run_main
     from gold_price_fetcher import get_gold_18k_price, PriceFetchError
     
     if text == "/start":
@@ -143,10 +150,13 @@ def handle_bale_command(chat_id, text):
             send_bale(chat_id, "❌ خطا در دریافت قیمت")
     
     elif text == "/signal":
-        send_bale(chat_id, "🔍 در حال دریافت تحلیل...")
-        result = fetch_and_send_report(chat_id)
-        if not result.get("bale"):
-            send_bale(chat_id, "❌ خطا در دریافت تحلیل")
+        send_bale(chat_id, "🔍 در حال دریافت تحلیل... لطفاً صبر کنید.")
+        try:
+            result = run_main(chat_id)  # ✅ استفاده از run_main
+            if not result.get("bale", False):
+                send_bale(chat_id, "❌ خطا در دریافت تحلیل. دوباره تلاش کنید.")
+        except Exception as e:
+            send_bale(chat_id, f"❌ خطا: {str(e)[:100]}")
     
     else:
         send_bale(chat_id, "❌ دستور نامعتبر. /help را بزنید.")
@@ -186,7 +196,7 @@ def run_bot():
                     last_bale_update = update["update_id"] + 1
             
         except Exception as e:
-            print(f"❌ خطا: {e}")
+            print(f"❌ خطا در حلقه اصلی: {e}")
         
         time.sleep(3)
 
