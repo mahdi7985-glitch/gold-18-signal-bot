@@ -20,13 +20,13 @@ from bale_notifier import send_bale_message
 # توابع کمکی برای فرمت‌دهی زمان (ایران)
 # ============================================
 PERSIAN_WEEKDAYS = {
-    0: "دوشنبه",
-    1: "سه‌شنبه",
-    2: "چهارشنبه",
-    3: "پنجشنبه",
-    4: "جمعه",
-    5: "شنبه",
-    6: "یکشنبه",
+    0: "شنبه",
+    1: "یکشنبه",
+    2: "دوشنبه",
+    3: "سه شنبه",
+    4: "چهارشنبه",
+    5: "پنجشنبه",
+    6: "جمعه",
 }
 
 
@@ -291,12 +291,20 @@ def fetch_and_send_report(chat_id: Optional[str] = None) -> Dict[str, bool]:
     return result
 
 
-def run() -> None:
-    """نقطه ورود اصلی"""
+def run(chat_id: Optional[str] = None) -> Dict[str, bool]:
+    """
+    نقطه ورود اصلی
+    
+    Args:
+        chat_id: شناسه کاربر برای پاسخ (اختیاری)
+    
+    Returns:
+        dict: نتایج ارسال به هر سرویس
+    """
     # بررسی تنظیمات
     if not TELEGRAM_BOT_TOKEN and not BALE_BOT_TOKEN:
         print("[ERROR] هیچ سرویسی (تلگرام یا بله) تنظیم نشده است!", file=sys.stderr)
-        sys.exit(1)
+        return {"telegram": False, "bale": False}
     
     if TELEGRAM_BOT_TOKEN and not TELEGRAM_CHAT_ID:
         print("[WARNING] TELEGRAM_BOT_TOKEN تنظیم شده ولی TELEGRAM_CHAT_ID خالی است!")
@@ -304,7 +312,7 @@ def run() -> None:
     if BALE_BOT_TOKEN and not BALE_CHAT_ID:
         print("[WARNING] BALE_BOT_TOKEN تنظیم شده ولی BALE_CHAT_ID خالی است!")
 
-    fetch_and_send_report()
+    return fetch_and_send_report(chat_id)
 
 
 if __name__ == "__main__":
