@@ -108,7 +108,7 @@ def get_latest_indicators(price_series: pd.Series) -> Optional[Tuple[pd.Series, 
 # ============================================
 # دریافت تحلیل کامل (برای main)
 # ============================================
-def get_latest_analysis(price_series: pd.Series) -> Dict[str, Any]:
+def get_latest_analysis(price_series: pd.Series) -> Optional[Dict[str, Any]]:
     """
     دریافت تحلیل کامل با تمام اندیکاتورها و وضعیت‌ها.
     
@@ -116,19 +116,13 @@ def get_latest_analysis(price_series: pd.Series) -> Dict[str, Any]:
         price_series: سری قیمت‌های خام
     
     Returns:
-        dict: {
-            'error': str (اگر خطایی باشد),
-            'indicators': {...},
-            'trend': 'صعودی'|'نزولی'|'خنثی',
-            'rsi_status': 'اشباع خرید'|'اشباع فروش'|'متعادل',
-            'adx_status': 'قوی'|'ضعیف',
-            'macd_status': 'صعودی'|'نزولی'|'خنثی',
-        }
+        dict: اگر داده کافی باشد
+        None: اگر داده کافی نباشد
     """
     result = get_latest_indicators(price_series)
     
     if result is None:
-        return {"error": f"داده کافی نیست (حداقل {config.MIN_CANDLES_REQUIRED} کندل)"}
+        return None  # ← اصلاح شده: به جای error، None برمی‌گرداند
     
     last_row, df = result
     
