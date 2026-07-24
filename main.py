@@ -258,8 +258,11 @@ def fetch_and_send_report(chat_id: Optional[str] = None) -> Dict[str, bool]:
     history = load_history()
     analysis_result = get_latest_analysis(history["price"])
     
-    # اگر تحلیل نداریم
-    if analysis_result is None or "error" in analysis_result:
+    # ============================================
+    # 🔧 بخش اصلاح‌شده - خط 169
+    # ============================================
+    # اگر تحلیل نداریم (فقط زمانی که None باشد)
+    if analysis_result is None:
         candles_count = len(build_ohlc_candles(history["price"]))
         message = format_collecting_data_message(
             price, 
