@@ -121,7 +121,7 @@ def _fetch_from_tgju(url: str = None) -> float:
 
 
 def fetch_dollar_price() -> float:
-    """دریافت قیمت دلار آزاد از tgju.org (خروجی به تومان)"""
+    """دریافت قیمت دلار آزاد از tgju.org (خروجی به ریال)"""
     dollar_url = "https://www.tgju.org/%D9%82%DB%8C%D9%85%D8%AA-%D8%AF%D9%84%D8%A7%D8%B1"
     
     try:
@@ -143,9 +143,7 @@ def fetch_dollar_price() -> float:
         if tag and tag.get_text(strip=True):
             text = tag.get_text(strip=True)
             try:
-                price_raw = _parse_price_text(text)
-                # قیمت دلار در tgju به ریال هست، تبدیل به تومان
-                return price_raw / 10
+                return _parse_price_text(text)
             except ValueError:
                 continue
     
@@ -239,8 +237,11 @@ def get_gold_18k_price() -> float:
 
     try:
         price_raw = _fetch_from_tgju()
-        # قیمت از tgju به ریال هست، تبدیل به تومان
-        return price_raw / 10
+        # ✅ اصلاح: بررسی هوشمند برای حذف صفر اضافی (تبدیل ریال به تومان)
+        # اگر عدد خام بزرگتر از ۱۰۰ میلیون باشد، یعنی ریال است و باید بر ۱۰ تقسیم شود
+        if price_raw > 100_000_000:
+            return price_raw / 10.0
+        return price_raw
             
     except PriceFetchError:
         raise
@@ -254,7 +255,12 @@ def get_dollar_price() -> float:
         return _fetch_mock_dollar()
     
     try:
-        return fetch_dollar_price()
+        price_raw = fetch_dollar_price()
+        # ✅ اصلاح: بررسی هوشمند برای حذف صفر اضافی (تبدیل ریال به تومان)
+        # اگر عدد خام بزرگتر از ۱ میلیون باشد، یعنی ریال است و باید بر ۱۰ تقسیم شود
+        if price_raw > 1_000_000:
+            return price_raw / 10.0
+        return price_raw
     except PriceFetchError:
         raise
     except Exception as exc:
@@ -262,15 +268,17 @@ def get_dollar_price() -> float:
 
 
 def get_dollar_with_change() -> Tuple[float, float]:
-    """دریافت قیمت دلار و تغییرات درصدی"""
+    """دریافت قیمت دلار و تغییرات (به صورت کسر اعشاری، مثلاً 0.015 به جای 1.5)"""
     global _dollar_history
     
     price = get_dollar_price()
-    change = 0
+    change = 0.0
     
     if _dollar_history:
         prev = _dollar_history[-1]
-        change = ((price - prev) / prev) * 100
+        if prev > 0:
+            # ✅ اصلاح: حذف ضرب در ۱۰۰ برای جلوگیری از ۲ صفر اضافی در نمایش نهایی
+            change = (price - prev) / prev
     
     _dollar_history.append(price)
     if len(_dollar_history) > 100:
@@ -293,15 +301,17 @@ def get_ounce_price() -> float:
 
 
 def get_ounce_with_change() -> Tuple[float, float]:
-    """دریافت قیمت اونس و تغییرات درصدی"""
+    """دریافت قیمت اونس و تغییرات (به صورت کسر اعشاری)"""
     global _ounce_history
     
     price = get_ounce_price()
-    change = 0
+    change = 0.0
     
     if _ounce_history:
         prev = _ounce_history[-1]
-        change = ((price - prev) / prev) * 100
+        if prev > 0:
+            # ✅ اصلاح: حذف ضرب در ۱۰۰ برای جلوگیری از ۲ صفر اضافی در نمایش نهایی
+            change = (price - prev) / prev
     
     _ounce_history.append(price)
     if len(_ounce_history) > 100:
@@ -351,20 +361,21 @@ def get_all_prices_with_change() -> Dict[str, Any]:
     if USE_MOCK_PRICE:
         return {
             'gold_18k': _fetch_mock_price(),
-            'gold_18k_change': random.uniform(-2, 2),
+            # ✅ اصلاح: تقسیم بر ۱۰۰ برای هماهنگی با فرمت اعشاری
+            'gold_18k_change': random.uniform(-2, 2) / 100.0,
             'dollar': _fetch_mock_dollar(),
-            'dollar_change': random.uniform(-1, 1),
+            'dollar_change': random.uniform(-1, 1) / 100.0,
             'ounce': _fetch_mock_ounce(),
-            'ounce_change': random.uniform(-0.5, 0.5),
+            'ounce_change': random.uniform(-0.5, 0.5) / 100.0,
         }
     
     results = {
         'gold_18k': 0,
-        'gold_18k_change': 0,
+        'gold_18k_change': 0.0,
         'dollar': 0,
-        'dollar_change': 0,
+        'dollar_change': 0.0,
         'ounce': 0,
-        'ounce_change': 0,
+        'ounce_change': 0.0,
     }
     
     try:
@@ -410,3 +421,9 @@ if __name__ == "__main__":
         print(f"🏅 اونس جهانی: {ounce:,.2f} دلار")
     except PriceFetchError as e:
         print(f"❌ خطا: {e}")
+        
+    print("-" * 60)
+    print("📈 تست تغییرات (باید اعدادی مثل 0.015 برگرداند نه 1.5):")
+    prices_with_change = get_all_prices_with_change()
+    print(f"تغییر دلار: {prices_with_change['dollar_change']:.4f}")
+    print(f"تغییر اونس: {prices_with_change['ounce_change']:.4f}")
