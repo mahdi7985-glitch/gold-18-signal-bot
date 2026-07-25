@@ -5,6 +5,10 @@ from typing import Optional, Tuple, Dict, Any
 from datetime import datetime
 import time
 import re
+import urllib3
+
+# غیرفعال کردن هشدارهای SSL (فقط برای این ماژول)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from config import GOLD_18K_URL, USE_MOCK_PRICE
 
@@ -69,7 +73,8 @@ def _fetch_from_tgju(url: str = None) -> float:
     url = url or GOLD_18K_URL
     
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        # 🔧 اضافه کردن verify=False برای رفع مشکل SSL
+        response = requests.get(url, headers=HEADERS, timeout=15, verify=False)
         response.raise_for_status()
     except requests.RequestException as e:
         raise PriceFetchError(f"خطا در اتصال به {url}: {e}")
@@ -126,7 +131,8 @@ def fetch_dollar_price() -> float:
     dollar_url = "https://www.tgju.org/%D9%82%DB%8C%D9%85%D8%AA-%D8%AF%D9%84%D8%A7%D8%B1"
     
     try:
-        response = requests.get(dollar_url, headers=HEADERS, timeout=15)
+        # 🔧 اضافه کردن verify=False برای رفع مشکل SSL
+        response = requests.get(dollar_url, headers=HEADERS, timeout=15, verify=False)
         response.raise_for_status()
     except requests.RequestException as e:
         raise PriceFetchError(f"خطا در دریافت قیمت دلار: {e}")
@@ -162,7 +168,8 @@ def fetch_ounce_price() -> float:
     ounce_url = "https://www.goldprice.org/fa/"
 
     try:
-        response = requests.get(ounce_url, headers=HEADERS, timeout=15)
+        # 🔧 اضافه کردن verify=False برای رفع مشکل SSL
+        response = requests.get(ounce_url, headers=HEADERS, timeout=15, verify=False)
         response.raise_for_status()
     except requests.RequestException:
         # منبع پشتیبان
@@ -198,7 +205,8 @@ def _fetch_ounce_from_alternative() -> float:
     """دریافت قیمت اونس از منبع پشتیبان"""
     alt_url = "https://api.gold-api.com/price/XAU"
     try:
-        response = requests.get(alt_url, headers=HEADERS, timeout=10)
+        # 🔧 اضافه کردن verify=False برای رفع مشکل SSL
+        response = requests.get(alt_url, headers=HEADERS, timeout=10, verify=False)
         response.raise_for_status()
         data = response.json()
         if "price" in data:
