@@ -1,194 +1,102 @@
-import pandas as pd
-import numpy as np
-from ta.trend import EMAIndicator, MACD, ADXIndicator
-from ta.momentum import RSIIndicator
-from typing import Optional, Tuple, Dict, Any
-
-import config
-
-
-# ============================================
-# ساخت کندل‌های OHLC
-# ============================================
-def build_ohlc_candles(price_series: pd.Series, rule: str = config.RESAMPLE_RULE) -> pd.DataFrame:
+def calculate_support_resistance(
+    price_series: pd.Series, 
+    period: int = 20,
+    multiplier: float = 1.5
+) -> Tuple[Optional[float], Optional[float]]:
     """
-    سری قیمت خام را به کندل‌های OHLC در بازه‌ی مشخص تبدیل می‌کند.
+    محاسبه حمایت و مقاومت با استفاده از باندهای بولینگر
     
     Args:
-        price_series: سری قیمت‌های خام (با ایندکس زمانی)
-        rule: بازه زمانی (مثلاً '4h' برای ۴ ساعته)
+        price_series: سری قیمت‌ها
+        period: دوره محاسبه (پیش‌فرض ۲۰)
+        multiplier: ضریب انحراف معیار (پیش‌فرض ۱.۵)
     
     Returns:
-        DataFrame با ستون‌های: open, high, low, close
+        tuple: (support, resistance) یا (None, None) اگر داده کافی نباشد
     """
-    ohlc = price_series.resample(rule).ohlc()
-    ohlc = ohlc.dropna(subset=["close"])
-    return ohlc
+    if len(price_series) < period:
+        return None, None
+    
+    # گرفتن آخرین 'period' قیمت
+    recent_prices = price_series.iloc[-period:]
+    
+    # محاسبه میانگین و انحراف معیار
+    mean = recent_prices.mean()
+    std = recent_prices.std()
+    
+    # محاسبه حمایت و مقاومت
+    support = mean - (multiplier * std)
+    resistance = mean + (multiplier * std)
+    
+    # اطمینان از منطقی بودن سطوح
+    last_price = price_series.iloc[-1]
+    
+    # اگر حمایت از قیمت فعلی بالاتر بود، اصلاح کن
+    if support > last_price:
+        support = last_price * 0.97
+    
+    # اگر مقاومت از قیمت فعلی پایین‌تر بود، اصلاح کن
+    if resistance < last_price:
+        resistance = last_price * 1.03
+    
+    # اگر حمایت و مقاومت خیلی نزدیک بودن، اصلاح کن
+    if support and resistance and (resistance - support) < (last_price * 0.02):
+        support = support * 0.98
+        resistance = resistance * 1.02
+    
+    return support, resistance
 
 
-# ============================================
-# محاسبه اندیکاتورها (مدل جدید)
-# ============================================
-def compute_indicators(candles: pd.DataFrame) -> pd.DataFrame:
+def calculate_key_levels(
+    price_series: pd.Series,
+    period: int = 20
+) -> Dict[str, Optional[float]]:
     """
-    محاسبه اندیکاتورهای موردنیاز با Lengthهای جدید.
-    
-    اندیکاتورها:
-    - EMA 20 (سریع)
-    - EMA 50 (کند - خط آتش)
-    - RSI 10
-    - MACD (10, 22, 8)
-    - ADX 14
-    
-    Args:
-        candles: DataFrame با ستون‌های: open, high, low, close
+    محاسبه سطوح کلیدی (حمایت و مقاومت با چند روش)
     
     Returns:
-        DataFrame با اندیکاتورهای اضافه‌شده
+        dict: {
+            'support_1': float,
+            'support_2': float,
+            'resistance_1': float,
+            'resistance_2': float,
+            'pivot': float,
+        }
     """
-    df = candles.copy()
-    close, high, low = df["close"], df["high"], df["low"]
-
-    # ========== EMA 20 و 50 ==========
-    df["ema_fast"] = EMAIndicator(close, window=config.EMA_FAST).ema_indicator()
-    df["ema_slow"] = EMAIndicator(close, window=config.EMA_SLOW).ema_indicator()
-
-    # ========== RSI با Length 10 ==========
-    rsi = RSIIndicator(close, window=config.RSI_LENGTH)
-    df["rsi"] = rsi.rsi()
-
-    # ========== MACD (10, 22, 8) ==========
-    macd = MACD(
-        close,
-        window_fast=config.MACD_FAST,
-        window_slow=config.MACD_SLOW,
-        window_sign=config.MACD_SIGNAL,
-    )
-    df["macd"] = macd.macd()
-    df["macd_signal"] = macd.macd_signal()
-    df["macd_hist"] = macd.macd_diff()
-
-    # ========== ADX 14 ==========
-    adx = ADXIndicator(high, low, close, window=config.ADX_LENGTH)
-    df["adx"] = adx.adx()
-
-    return df
-
-
-# ============================================
-# دریافت آخرین اندیکاتورها
-# ============================================
-def get_latest_indicators(price_series: pd.Series) -> Optional[Tuple[pd.Series, pd.DataFrame]]:
-    """
-    آخرین ردیف کامل اندیکاتورها را به‌همراه کل DataFrame برمی‌گرداند.
+    if len(price_series) < period:
+        return {
+            'support_1': None,
+            'support_2': None,
+            'resistance_1': None,
+            'resistance_2': None,
+            'pivot': None,
+        }
     
-    Args:
-        price_series: سری قیمت‌های خام
+    # قیمت‌های اخیر
+    recent = price_series.iloc[-period:]
+    last_price = price_series.iloc[-1]
     
-    Returns:
-        (last_row, full_dataframe) یا None اگر داده کافی نباشد
-    """
-    candles = build_ohlc_candles(price_series)
+    # روش ۱: بولینگر
+    support_1, resistance_1 = calculate_support_resistance(price_series, period)
     
-    if len(candles) < config.MIN_CANDLES_REQUIRED:
-        return None
-
-    df = compute_indicators(candles)
+    # روش ۲: سطوح کلاسیک (High/Low)
+    high = recent.max()
+    low = recent.min()
+    pivot = (high + low + last_price) / 3
     
-    # حذف ردیف‌های دارای NaN
-    required_cols = ["ema_fast", "ema_slow", "rsi", "macd", "macd_signal", "macd_hist", "adx"]
-    df_valid = df.dropna(subset=required_cols)
+    support_2 = pivot - (high - low)
+    resistance_2 = pivot + (high - low)
     
-    if df_valid.empty:
-        return None
-
-    return df_valid.iloc[-1], df_valid
-
-
-# ============================================
-# دریافت تحلیل کامل (برای main)
-# ============================================
-def get_latest_analysis(price_series: pd.Series) -> Optional[Dict[str, Any]]:
-    """
-    دریافت تحلیل کامل با تمام اندیکاتورها و وضعیت‌ها.
-    
-    Args:
-        price_series: سری قیمت‌های خام
-    
-    Returns:
-        dict: اگر داده کافی باشد
-        None: اگر داده کافی نباشد
-    """
-    result = get_latest_indicators(price_series)
-    
-    if result is None:
-        return None  # ← اصلاح شده: به جای error، None برمی‌گرداند
-    
-    last_row, df = result
-    
-    # ===== تشخیص وضعیت‌ها =====
-    # روند با EMA
-    if last_row["close"] > last_row["ema_fast"] and last_row["ema_fast"] > last_row["ema_slow"]:
-        trend = "صعودی"
-    elif last_row["close"] < last_row["ema_fast"] and last_row["ema_fast"] < last_row["ema_slow"]:
-        trend = "نزولی"
-    else:
-        trend = "خنثی"
-    
-    # وضعیت RSI
-    if last_row["rsi"] > config.RSI_OVERBOUGHT:
-        rsi_status = "اشباع خرید"
-    elif last_row["rsi"] < config.RSI_OVERSOLD:
-        rsi_status = "اشباع فروش"
-    else:
-        rsi_status = "متعادل"
-    
-    # وضعیت ADX
-    adx_status = "قوی" if last_row["adx"] > config.ADX_THRESHOLD else "ضعیف"
-    
-    # وضعیت MACD
-    if last_row["macd_hist"] > 0 and last_row["macd"] > last_row["macd_signal"]:
-        macd_status = "صعودی"
-    elif last_row["macd_hist"] < 0 and last_row["macd"] < last_row["macd_signal"]:
-        macd_status = "نزولی"
-    else:
-        macd_status = "خنثی"
+    # اگر روش بولینگر جواب نداد، از روش کلاسیک استفاده کن
+    if support_1 is None:
+        support_1 = support_2
+    if resistance_1 is None:
+        resistance_1 = resistance_2
     
     return {
-        "error": None,
-        "indicators": {
-            "ema_fast": last_row["ema_fast"],
-            "ema_slow": last_row["ema_slow"],
-            "rsi": last_row["rsi"],
-            "macd": last_row["macd"],
-            "macd_signal": last_row["macd_signal"],
-            "macd_hist": last_row["macd_hist"],
-            "adx": last_row["adx"],
-        },
-        "trend": trend,
-        "rsi_status": rsi_status,
-        "adx_status": adx_status,
-        "macd_status": macd_status,
-        "last_row": last_row,
-        "df": df,
+        'support_1': support_1,
+        'support_2': support_2,
+        'resistance_1': resistance_1,
+        'resistance_2': resistance_2,
+        'pivot': pivot,
     }
-
-
-# ============================================
-# تابع کمکی برای دریافت آخرین قیمت
-# ============================================
-def get_last_price(price_series: pd.Series) -> Optional[float]:
-    """دریافت آخرین قیمت از سری قیمت"""
-    if price_series.empty:
-        return None
-    return price_series.iloc[-1]
-
-
-# ============================================
-# تابع کمکی برای دریافت قیمت قبلی
-# ============================================
-def get_previous_price(price_series: pd.Series) -> Optional[float]:
-    """دریافت قیمت قبلی از سری قیمت"""
-    if len(price_series) < 2:
-        return None
-    return price_series.iloc[-2]
