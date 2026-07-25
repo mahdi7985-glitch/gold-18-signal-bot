@@ -67,7 +67,7 @@ def find_rsi_divergence(df: pd.DataFrame, lookback: int = 20) -> Dict[str, Any]:
             strength = min(100, int((p1[2] - p2[2]) * 5))
             return {
                 "type": "bearish",
-                "description": "قیمت سقف جدید زده ولی RSI پایین‌تر آمده (ضعف خریدار)",
+                "description": "قیمت سقف جدید زده ولی قدرت خریدار کم شده (ضعف)",
                 "strength": strength
             }
     
@@ -79,7 +79,7 @@ def find_rsi_divergence(df: pd.DataFrame, lookback: int = 20) -> Dict[str, Any]:
             strength = min(100, int((t2[2] - t1[2]) * 5))
             return {
                 "type": "bullish",
-                "description": "قیمت کف جدید زده ولی RSI بالاتر آمده (ضعف فروشنده)",
+                "description": "قیمت کف جدید زده ولی قدرت فروشنده کم شده (ضعف)",
                 "strength": strength
             }
     
@@ -127,6 +127,93 @@ def detect_trend(row: pd.Series) -> Dict[str, Any]:
 
 
 # ============================================
+# تابع تولید پیام دوستانه
+# ============================================
+def generate_friendly_signal(analysis_result: Dict[str, Any]) -> Dict[str, str]:
+    """
+    تبدیل تحلیل به متن دوستانه برای کاربر
+    
+    Args:
+        analysis_result: خروجی تابع analyze
+    
+    Returns:
+        dict: {
+            'friendly_message': 'متن صمیمی',
+            'simple_reason': 'دلیل ساده',
+            'advice': 'توصیه عملی'
+        }
+    """
+    signal = analysis_result.get("signal", "WAIT")
+    signal_text = analysis_result.get("signal_text", "صبر کن")
+    confidence = analysis_result.get("signal_confidence", 0)
+    trend = analysis_result.get("trend", "خنثی")
+    indicators = analysis_result.get("indicators", {})
+    
+    rsi = indicators.get("rsi", 50)
+    adx = indicators.get("adx", 0)
+    macd_hist = indicators.get("macd_hist", 0)
+    
+    # پیام‌های دوستانه بر اساس سیگنال
+    friendly_messages = {
+        "BUY": "🚀 رفیق، امروز روز خوبیه برای خرید! همه چیز داره هموار میشه. ولی یادت باشه هیچوقت یه‌دفعه همه سرمایه‌ات رو نریزی تو کار.",
+        "BUY_CAUTIOUS": "🟡 امروز به خرید مایل‌ترم، ولی با احتیاط! صبر کن تا سیگنال قوی‌تر بشه یا با یه چهارم سرمایه شروع کن.",
+        "SELL": "⚠️ راستش امروز اوضاع خوش‌یمن نیست. اگه طلا داری، شاید بهتر باشه یه کم بفروشی و نقد شی. ولی این تصمیم با خودته.",
+        "SELL_CAUTIOUS": "🟠 امروز کمی نگران‌کننده‌ست. اگه طلا داری، شاید بهتر باشه یه کم صبر کنی ببینی چی میشه. عجله نکن.",
+        "WAIT": "🤔 امروز یه وضعیت دو پهلو داریم. من که دست نگه می‌دارم، تو هم عجله نکن. فردا صبح دوباره چک می‌کنیم.",
+    }
+    
+    # توضیح ساده دلایل
+    reasons = []
+    
+    # RSI
+    if rsi > 70:
+        reasons.append(f"بازار داغ شده (RSI: {rsi:.0f})، ممکنه برگرده پایین")
+    elif rsi < 30:
+        reasons.append(f"بازار سرده (RSI: {rsi:.0f})، ممکنه برگرده بالا")
+    else:
+        reasons.append(f"بازار متعادله (RSI: {rsi:.0f})")
+    
+    # ADX
+    if adx > 25:
+        reasons.append(f"روند با قدرت خوبی حرکت میکنه (ADX: {adx:.0f})")
+    else:
+        reasons.append(f"روند مشخصی نداریم (ADX: {adx:.0f})")
+    
+    # MACD
+    if macd_hist > 0:
+        reasons.append("فشار خریدار بیشتره (مکدی مثبت)")
+    else:
+        reasons.append("فشار فروشنده بیشتره (مکدی منفی)")
+    
+    # روند
+    if "صعودی" in trend:
+        reasons.append(f"روند کلی {trend} هست")
+    elif "نزولی" in trend:
+        reasons.append(f"روند کلی {trend} هست")
+    else:
+        reasons.append("روند کلی مشخص نیست")
+    
+    # ترکیب دلیل ساده
+    simple_reason = " • ".join(reasons[:3])
+    if len(reasons) > 3:
+        simple_reason += f" • و {len(reasons)-3} مورد دیگه..."
+    
+    # توصیه عملی
+    if "BUY" in signal:
+        advice = "💡 پیشنهاد: با یه چهارم سرمایه شروع کن و اگه قیمت رفت پایین‌تر، میانگین بگیر."
+    elif "SELL" in signal:
+        advice = "💡 پیشنهاد: اگه سود خوبی داری، حداقل یه بخشی رو بفروش و نقد کن."
+    else:
+        advice = "💡 پیشنهاد: دست نگه دار و فردا دوباره چک کن."
+    
+    return {
+        'friendly_message': friendly_messages.get(signal, "🟡 صبر کن، فعلاً وقتش نیست."),
+        'simple_reason': simple_reason,
+        'advice': advice,
+    }
+
+
+# ============================================
 # تابع اصلی تحلیل سیگنال
 # ============================================
 def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
@@ -156,6 +243,7 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
             "signal_reason": "داده کافی برای تحلیل وجود ندارد",
             "signal_confidence": 0,
             "trend": "خنثی",
+            "trend_simple": "خنثی",
             "indicators": {}
         }
     
@@ -165,6 +253,7 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
     # ===== ۱. تشخیص روند =====
     trend_result = detect_trend(row)
     trend = trend_result["trend"]
+    trend_simple = "صعودی" if "صعودی" in trend else "نزولی" if "نزولی" in trend else "خنثی"
     
     # ===== ۲. تشخیص واگرایی =====
     divergence = find_rsi_divergence(df)
@@ -201,7 +290,7 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
         signal_text = "خرید"
         signal_emoji = "🟢"
         confidence = min(100, 60 + div_strength // 2 + 10)
-        signal_reason = f"✅ واگرایی مثبت + RSI اشباع فروش ({rsi:.0f}) + ADX قوی ({adx:.0f})"
+        signal_reason = f"قیمت کف جدید زده ولی قدرت فروشنده کم شده (واگرایی مثبت) + RSI خیلی پایین اومده ({rsi:.0f}) + روند کلی صعودیه"
     
     # === سیگنال خرید محتاطانه ===
     elif div_type == "bullish" and is_oversold and is_bullish_trend:
@@ -209,7 +298,7 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
         signal_text = "خرید محتاطانه"
         signal_emoji = "🟡"
         confidence = min(100, 40 + div_strength // 2)
-        signal_reason = f"🟡 واگرایی مثبت + RSI اشباع فروش ({rsi:.0f}) (ADX ضعیف، احتیاط)"
+        signal_reason = f"قیمت کف جدید زده ولی قدرت فروشنده کم شده (واگرایی مثبت) + RSI خیلی پایین اومده ({rsi:.0f}) ولی ADX قوی نیست (احتیاط)"
     
     # === سیگنال فروش ===
     elif div_type == "bearish" and is_overbought and is_strong_trend and is_bearish_trend and macd_bearish:
@@ -217,7 +306,7 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
         signal_text = "فروش"
         signal_emoji = "🔴"
         confidence = min(100, 60 + div_strength // 2 + 10)
-        signal_reason = f"❌ واگرایی منفی + RSI اشباع خرید ({rsi:.0f}) + ADX قوی ({adx:.0f})"
+        signal_reason = f"قیمت سقف جدید زده ولی قدرت خریدار کم شده (واگرایی منفی) + RSI خیلی بالا رفته ({rsi:.0f}) + روند کلی نزولیه"
     
     # === سیگنال فروش محتاطانه ===
     elif div_type == "bearish" and is_overbought and is_bearish_trend:
@@ -225,7 +314,7 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
         signal_text = "فروش محتاطانه"
         signal_emoji = "🟠"
         confidence = min(100, 40 + div_strength // 2)
-        signal_reason = f"🟠 واگرایی منفی + RSI اشباع خرید ({rsi:.0f}) (ADX ضعیف، احتیاط)"
+        signal_reason = f"قیمت سقف جدید زده ولی قدرت خریدار کم شده (واگرایی منفی) + RSI خیلی بالا رفته ({rsi:.0f}) ولی ADX قوی نیست (احتیاط)"
     
     # ===== ۵. ساخت خروجی =====
     return {
@@ -235,6 +324,7 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
         "signal_reason": signal_reason,
         "signal_confidence": confidence,
         "trend": trend,
+        "trend_simple": trend_simple,
         "indicators": {
             "ema_fast": row["ema_fast"],
             "ema_slow": row["ema_slow"],
@@ -257,17 +347,29 @@ def analyze(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-# ============================================
-# تابع تحلیل ساده برای استفاده در main
-# ============================================
+def analyze_with_friendly(df: pd.DataFrame, chat_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    تحلیل کامل با خروجی دوستانه
+    
+    Returns:
+        dict: ترکیبی از تحلیل و خروجی دوستانه
+    """
+    # تحلیل اصلی
+    result = analyze(df, chat_id)
+    
+    # افزودن خروجی دوستانه
+    friendly = generate_friendly_signal(result)
+    result['friendly'] = friendly
+    
+    return result
+
+
 def analyze_signal(row: pd.Series) -> Dict[str, Any]:
     """
     تحلیل سیگنال با یک ردیف (سازگاری با کد قدیمی)
     """
     # ساخت دیتافریم موقت
     df = pd.DataFrame([row])
-    # محاسبه اندیکاتورهای موردنیاز برای واگرایی (نیاز به تاریخچه دارد)
-    # این تابع فقط برای سازگاری با کد قدیمی است
     return {
         "signal": "WAIT",
         "signal_text": "صبر کن",
@@ -275,6 +377,7 @@ def analyze_signal(row: pd.Series) -> Dict[str, Any]:
         "signal_reason": "برای تحلیل نیاز به تاریخچه کامل داریم",
         "signal_confidence": 0,
         "trend": "خنثی",
+        "trend_simple": "خنثی",
         "indicators": {
             "ema_fast": row.get("ema_fast", 0),
             "ema_slow": row.get("ema_slow", 0),
@@ -284,4 +387,46 @@ def analyze_signal(row: pd.Series) -> Dict[str, Any]:
             "macd_hist": row.get("macd_hist", 0),
             "adx": row.get("adx", 0),
         }
-        }
+    }
+
+
+# ============================================
+# تست
+# ============================================
+if __name__ == "__main__":
+    print("=" * 60)
+    print("📊 تست تحلیل سیگنال")
+    print("=" * 60)
+    
+    # ساخت داده تست
+    import numpy as np
+    np.random.seed(42)
+    dates = pd.date_range(end=pd.Timestamp.now(), periods=100, freq='1h')
+    prices = 35000000 + np.cumsum(np.random.randn(100) * 20000)
+    
+    # ساخت دیتافریم با اندیکاتورهای ساده
+    df = pd.DataFrame({
+        'close': prices,
+        'high': prices * 1.002,
+        'low': prices * 0.998,
+        'ema_fast': prices * 0.98 + 50000,
+        'ema_slow': prices * 0.95 + 100000,
+        'rsi': 50 + np.cumsum(np.random.randn(100) * 2),
+        'macd': np.cumsum(np.random.randn(100) * 0.5),
+        'macd_signal': np.cumsum(np.random.randn(100) * 0.3),
+        'macd_hist': np.cumsum(np.random.randn(100) * 0.2),
+        'adx': 20 + np.random.randn(100) * 10,
+    })
+    
+    # تنظیم RSI آخرین ردیف برای تست
+    df.loc[df.index[-1], 'rsi'] = 25  # اشباع فروش
+    
+    # تست تحلیل
+    result = analyze_with_friendly(df)
+    
+    print(f"📊 سیگنال: {result['signal_text']} ({result['signal_confidence']}%)")
+    print(f"📈 روند: {result['trend']}")
+    print(f"📌 دلیل: {result['signal_reason']}")
+    print(f"\n💬 {result['friendly']['friendly_message']}")
+    print(f"📝 {result['friendly']['simple_reason']}")
+    print(f"💡 {result['friendly']['advice']}")
