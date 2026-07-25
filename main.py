@@ -1,3 +1,118 @@
+import sys
+from datetime import datetime
+from typing import Optional, Dict, Any  # ← این خط حتماً باید باشه
+import pandas as pd
+import os
+
+from config import (
+    EMA_FAST, EMA_SLOW, RSI_LENGTH, MACD_FAST, MACD_SLOW, MACD_SIGNAL, ADX_LENGTH,
+    RSI_OVERBOUGHT, RSI_OVERSOLD, ADX_THRESHOLD, MIN_CANDLES_REQUIRED,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BALE_BOT_TOKEN, BALE_CHAT_ID,
+    SHOW_LEVELS, SHOW_DOLLAR_OUNCE, SHOW_HISTORY, SHOW_DAILY_CHANGE,
+    HISTORY_FILE
+)
+from gold_price_fetcher import get_gold_18k_price, PriceFetchError, get_all_prices_with_change
+from storage import (
+    append_price, load_history, trim_history, get_previous_price, save_signal,
+    get_recent_prices, get_weekly_trend, get_price_change_percent
+)
+from indicators import get_latest_analysis, build_ohlc_candles, calculate_support_resistance
+from signal_analyzer import analyze_with_friendly
+from telegram_notifier import send_telegram_message
+from bale_notifier import send_bale_message
+
+
+# ============================================
+# بازنشانی تاریخچه (فقط یک بار)
+# ============================================
+def reset_history_if_needed():
+    """اگر تاریخچه با فرمت جدید هماهنگ نیست، بازنشانی کن"""
+    try:
+        if not os.path.exists(HISTORY_FILE):
+            return
+            
+        df = pd.read_csv(HISTORY_FILE)
+        if not df.empty:
+            sample = df["price"].iloc[0]
+            if sample < 10_000_000:
+                print("⚠️ تاریخچه قدیمی با فرمت ریال شناسایی شد. در حال بازنشانی...")
+                df_new = pd.DataFrame(columns=["timestamp", "price"])
+                df_new.to_csv(HISTORY_FILE, index=False)
+                print("✅ تاریخچه بازنشانی شد")
+    except Exception as e:
+        print(f"⚠️ خطا در بازنشانی تاریخچه: {e}")
+
+reset_history_if_needed()
+
+
+# ============================================
+# توابع کمکی برای فرمت‌دهی زمان (ایران)
+# ============================================
+PERSIAN_WEEKDAYS = {
+    0: "شنبه",
+    1: "یکشنبه",
+    2: "دوشنبه",
+    3: "سه شنبه",
+    4: "چهارشنبه",
+    5: "پنجشنبه",
+    6: "جمعه",
+}
+
+
+def get_jalali_now():
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    import jdatetime
+    now = dt.now(ZoneInfo("Asia/Tehran"))
+    return jdatetime.datetime.fromgregorian(datetime=now)
+
+
+def format_jalali_datetime(jalali) -> str:
+    weekday_name = PERSIAN_WEEKDAYS[jalali.weekday()]
+    return f"{weekday_name} {jalali.strftime('%Y/%m/%d')} | 🕒 {jalali.strftime('%H:%M')}"
+
+
+def get_iran_day() -> str:
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    days = {
+        0: "دوشنبه",
+        1: "سه‌شنبه",
+        2: "چهارشنبه",
+        3: "پنجشنبه",
+        4: "جمعه",
+        5: "شنبه",
+        6: "یکشنبه"
+    }
+    now = dt.now(ZoneInfo("Asia/Tehran"))
+    return days[now.weekday()]
+
+
+# ============================================
+# تابع ارسال به هر دو سرویس
+# ============================================
+def send_to_both(message: str, chat_id: Optional[str] = None) -> Dict[str, bool]:
+    results = {
+        "telegram": send_telegram_message(message, chat_id),
+        "bale": send_bale_message(message, chat_id)
+    }
+
+    success_count = sum(results.values())
+    if success_count == 2:
+        print("✅ پیام به هر دو سرویس (تلگرام و بله) ارسال شد.")
+    elif success_count == 1:
+        print("⚠️ پیام فقط به یکی از سرویس‌ها ارسال شد.")
+        failed = [k for k, v in results.items() if not v]
+        print(f"   سرویس‌های ناموفق: {', '.join(failed)}")
+    else:
+        print("❌ پیام به هیچکدام از سرویس‌ها ارسال نشد.")
+
+    return results
+
+
+# ============================================
+# تابع تولید گزارش کامل
+# ============================================
 def format_full_report(
     price: float,
     previous_price: Optional[float],
@@ -7,9 +122,6 @@ def format_full_report(
     ounce_price: Optional[float] = None,
     ounce_change: Optional[float] = None
 ) -> str:
-    """
-    تولید گزارش کامل و دوستانه با تاریخچه، تحلیل و فاکتورهای کلیدی
-    """
     # ===== زمان =====
     jalali = get_jalali_now()
     day_name = get_iran_day()
@@ -85,20 +197,16 @@ def format_full_report(
     trend = analysis.get("trend", "خنثی")
     signal_reason = analysis.get("signal_reason", "دلیل خاصی نداریم")
     
-    # اگر اطمینان ۰ بود، به ۳۵ تغییر بده
     if signal_confidence == 0:
         signal_confidence = 35
         signal_reason = "🔸 وضعیت نامشخص، بهتره صبر کنی تا بازار تکلیفش مشخص بشه."
     
-    # ===== پیام دوستانه =====
     friendly = analysis.get("friendly", {})
     friendly_message = friendly.get("friendly_message", "🟡 صبر کن، فعلاً وقتش نیست.")
     
-    # ===== اندیکاتورها =====
     indicators = analysis.get("indicators", {})
     rsi_val = indicators.get('rsi', 50)
     
-    # ===== تنظیم متن حرف آخر بر اساس RSI =====
     if "نزول" in trend_word or change_amount < 0:
         if rsi_val > 70:
             advice = "🔴 RSI اشباع خرید رو نشون میده. با توجه به ریزش امروز، احتمالاً این یه اصلاح موقتیه. بهتره صبر کنی تا قیمت به حمایت برسه و بعد تصمیم بگیری."
@@ -111,7 +219,6 @@ def format_full_report(
     history = load_history()
     support_raw, resistance_raw = calculate_support_resistance(history["price"], period=14)
     
-    # 🔧 تبدیل ریال به تومان
     support = support_raw / 10 if support_raw else None
     resistance = resistance_raw / 10 if resistance_raw else None
     
@@ -144,7 +251,6 @@ def format_full_report(
 • میانگین ۵۰ روزه: {indicators.get('ema_slow', 0)/10:,.0f} تومان
 • RSI: {indicators.get('rsi', 0):.1f} """
 
-    # توضیح RSI
     if rsi_val > 70:
         message += "🔴 اشباع خرید\n"
     elif rsi_val < 30:
@@ -154,7 +260,6 @@ def format_full_report(
     
     message += f"""• قدرت روند (ADX): {indicators.get('adx', 0):.1f} """
     
-    # توضیح ADX
     adx_val = indicators.get('adx', 0)
     if adx_val > 25:
         message += "💪 قوی\n"
@@ -163,16 +268,13 @@ def format_full_report(
     else:
         message += "😶 ضعیف\n"
     
-    # MACD
     if 'macd' in indicators and 'macd_signal' in indicators:
         if indicators['macd'] > indicators['macd_signal']:
             message += "• مکدی: مثبت 📈 (مومنتوم صعودی)\n"
         else:
             message += "• مکدی: منفی 📉 (مومنتوم نزولی)\n"
     
-    # ===== سطوح کلیدی با فاصله درصدی =====
     if SHOW_LEVELS and support and resistance:
-        # 🔧 محاسبه فاصله درصدی با قیمت به تومان
         dist_to_support = ((price - support) / price) * 100
         dist_to_resistance = ((resistance - price) / price) * 100
         
@@ -189,7 +291,6 @@ def format_full_report(
 🚀 **مقاومت دوم:** {resistance2:,.0f} تومان ({dist_to_resistance + 2:.1f}% بالاتر)
 """
     
-    # ===== دلار و انس =====
     if SHOW_DOLLAR_OUNCE and dollar_price:
         dollar_emoji = "🟢" if dollar_change and dollar_change > 0 else "🔻" if dollar_change and dollar_change < 0 else "⚪"
         message += f"""
@@ -202,7 +303,6 @@ def format_full_report(
             ounce_emoji = "🟢" if ounce_change and ounce_change > 0 else "🔻" if ounce_change and ounce_change < 0 else "⚪"
             message += f"""🏅 انس جهانی: ${ounce_price:,.2f} ({ounce_emoji} {'صعودی' if ounce_change and ounce_change > 0 else 'نزولی' if ounce_change and ounce_change < 0 else 'ثابت'})
 """
-            # تأثیر ترکیبی
             if dollar_change and ounce_change:
                 if dollar_change > 0 and ounce_change > 0:
                     message += "🔺 تأثیر روی طلا: **مثبت قوی** (هر دو صعودی)"
@@ -213,7 +313,6 @@ def format_full_report(
                 else:
                     message += "🔻 تأثیر روی طلا: **منفی** (هر دو نزولی)"
     
-    # ===== حرف آخر =====
     message += f"""
 ━━━━━━━━━━━━━━━━━━━━
 🗣️ حرف آخر:
@@ -222,3 +321,115 @@ def format_full_report(
 """
     
     return message
+
+
+def format_collecting_data_message(price: float, have: int, need: int) -> str:
+    jalali = get_jalali_now()
+    price_toman = price
+    day_name = get_iran_day()
+    
+    return f"""سلام رفیق! 👋
+در حال راه‌اندازی تحلیلگر طلا هستم...
+
+📅 {format_jalali_datetime(jalali)}
+📍 {day_name}
+
+💰 قیمت لحظه‌ای: **{price_toman:,.0f}** تومان
+
+⏳ در حال جمع‌آوری داده برای تحلیل تکنیکال ({have}/{need} کندل).
+
+📊 هر چی داده بیشتر باشه، تحلیل دقیق‌تر میشه.
+به‌محض کافی‌شدن داده، گزارش کامل رو برات می‌فرستم.
+
+صبر کن تا بهت خبر بدم 🤝
+"""
+
+
+# ============================================
+# تابع اصلی fetch_and_send_report
+# ============================================
+def fetch_and_send_report(chat_id: Optional[str] = None) -> Dict[str, bool]:
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] شروع دریافت گزارش...")
+
+    try:
+        price = get_gold_18k_price()
+    except PriceFetchError as exc:
+        print(f"[ERROR] دریافت قیمت ناموفق بود: {exc}", file=sys.stderr)
+        return {"telegram": False, "bale": False}
+
+    print(f"[INFO] قیمت دریافت‌شده: {price:,.0f} تومان")
+
+    all_data = get_all_prices_with_change()
+    dollar_price = all_data.get('dollar', 0)
+    dollar_change = all_data.get('dollar_change', 0)
+    ounce_price = all_data.get('ounce', 0)
+    ounce_change = all_data.get('ounce_change', 0)
+
+    append_price(price)
+    trim_history()
+
+    previous_price = get_previous_price()
+    
+    history = load_history()
+    analysis_result = get_latest_analysis(history["price"])
+    
+    if analysis_result is None:
+        candles_count = len(build_ohlc_candles(history["price"]))
+        message = format_collecting_data_message(
+            price, 
+            candles_count, 
+            MIN_CANDLES_REQUIRED
+        )
+        result = send_to_both(message, chat_id)
+        return result
+    
+    from signal_analyzer import analyze_with_friendly
+    df = analysis_result.get("df")
+    if df is not None:
+        friendly_result = analyze_with_friendly(df)
+        analysis_result['friendly'] = friendly_result.get('friendly', {})
+    
+    message = format_full_report(
+        price, 
+        previous_price, 
+        analysis_result,
+        dollar_price,
+        dollar_change,
+        ounce_price,
+        ounce_change
+    )
+    
+    print(f"[INFO] سیگنال: {analysis_result.get('signal', 'WAIT')} | اطمینان: {analysis_result.get('signal_confidence', 0)}%")
+    
+    try:
+        signal_data = {
+            "price": price,
+            "signal": analysis_result.get("signal", "WAIT"),
+            "signal_text": analysis_result.get("signal_text", ""),
+            "signal_confidence": analysis_result.get("signal_confidence", 0),
+            "trend": analysis_result.get("trend", ""),
+        }
+        save_signal(signal_data)
+    except Exception as e:
+        print(f"⚠️ خطا در ذخیره سیگنال: {e}")
+    
+    result = send_to_both(message, chat_id)
+    return result
+
+
+def run(chat_id: Optional[str] = None) -> Dict[str, bool]:
+    if not TELEGRAM_BOT_TOKEN and not BALE_BOT_TOKEN:
+        print("[ERROR] هیچ سرویسی (تلگرام یا بله) تنظیم نشده است!", file=sys.stderr)
+        return {"telegram": False, "bale": False}
+    
+    if TELEGRAM_BOT_TOKEN and not TELEGRAM_CHAT_ID:
+        print("[WARNING] TELEGRAM_BOT_TOKEN تنظیم شده ولی TELEGRAM_CHAT_ID خالی است!")
+    
+    if BALE_BOT_TOKEN and not BALE_CHAT_ID:
+        print("[WARNING] BALE_BOT_TOKEN تنظیم شده ولی BALE_CHAT_ID خالی است!")
+
+    return fetch_and_send_report(chat_id)
+
+
+if __name__ == "__main__":
+    run()
