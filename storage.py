@@ -1,5 +1,5 @@
 import os
-from typing import Optional, List, Dict, Any  # ← اضافه شد
+from typing import Optional, List, Dict, Any
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 
@@ -32,7 +32,7 @@ def append_price(price: float, timestamp: Optional[datetime] = None) -> None:
     یک رکورد قیمت جدید را به فایل تاریخچه اضافه می‌کند.
     
     Args:
-        price: قیمت به ریال
+        price: قیمت به تومان
         timestamp: زمان (اگر None نباشد، از زمان فعلی استفاده می‌شود)
     """
     ensure_data_dir()
@@ -42,9 +42,12 @@ def append_price(price: float, timestamp: Optional[datetime] = None) -> None:
     from zoneinfo import ZoneInfo
     iran_time = timestamp.astimezone(ZoneInfo("Asia/Tehran"))
     
+    # 🔧 اصلاح: تبدیل تومان به ریال برای ذخیره (هماهنگی با تاریخچه قدیمی)
+    price_rial = price * 10
+    
     row = pd.DataFrame([{
         "timestamp": iran_time.isoformat(),
-        "price": price
+        "price": price_rial  # ذخیره به ریال
     }])
 
     if os.path.exists(HISTORY_FILE):
@@ -79,44 +82,47 @@ def load_history() -> pd.DataFrame:
 
 def get_previous_price() -> Optional[float]:
     """
-    دریافت قیمت قبلی (آخرین قیمت قبل از قیمت فعلی)
+    دریافت قیمت قبلی (آخرین قیمت قبل از قیمت فعلی) - به تومان
     
     Returns:
-        float: قیمت قبلی یا None اگر وجود نداشته باشد
+        float: قیمت قبلی به تومان یا None اگر وجود نداشته باشد
     """
     history = load_history()
     if len(history) < 2:
         return None
-    return history["price"].iloc[-2]
+    # 🔧 تبدیل ریال به تومان
+    return history["price"].iloc[-2] / 10
 
 
 def get_last_price() -> Optional[float]:
     """
-    دریافت آخرین قیمت ذخیره‌شده
+    دریافت آخرین قیمت ذخیره‌شده - به تومان
     
     Returns:
-        float: آخرین قیمت یا None اگر وجود نداشته باشد
+        float: آخرین قیمت به تومان یا None اگر وجود نداشته باشد
     """
     history = load_history()
     if history.empty:
         return None
-    return history["price"].iloc[-1]
+    # 🔧 تبدیل ریال به تومان
+    return history["price"].iloc[-1] / 10
 
 
 def get_price_by_index(index: int = -1) -> Optional[float]:
     """
-    دریافت قیمت در ایندکس مشخص
+    دریافت قیمت در ایندکس مشخص - به تومان
     
     Args:
         index: ایندکس (مثلاً -1 برای آخرین، -2 برای قبلی)
     
     Returns:
-        float: قیمت یا None اگر وجود نداشته باشد
+        float: قیمت به تومان یا None اگر وجود نداشته باشد
     """
     history = load_history()
     if len(history) < abs(index):
         return None
-    return history["price"].iloc[index]
+    # 🔧 تبدیل ریال به تومان
+    return history["price"].iloc[index] / 10
 
 
 def get_history_for_period(days: int = 30) -> pd.DataFrame:
@@ -187,8 +193,8 @@ def get_price_change_percent() -> Optional[float]:
     if len(history) < 2:
         return None
     
-    last_price = history["price"].iloc[-1]
-    prev_price = history["price"].iloc[-2]
+    last_price = history["price"].iloc[-1] / 10  # تبدیل به تومان
+    prev_price = history["price"].iloc[-2] / 10  # تبدیل به تومان
     
     if prev_price == 0:
         return None
@@ -243,7 +249,7 @@ def get_weekly_trend() -> Dict[str, Any]:
             'trend': 'داده کافی نیست'
         }
     
-    # ۵ روز آخر
+    # ۵ روز آخر - تبدیل ریال به تومان
     recent = history["price"].iloc[-5:]
     prices_toman = [p / 10 for p in recent.tolist()]
     
@@ -388,7 +394,7 @@ if __name__ == "__main__":
     # تست ذخیره قیمت
     test_price = 35_000_000
     append_price(test_price)
-    print(f"✅ قیمت {test_price:,.0f} ذخیره شد")
+    print(f"✅ قیمت {test_price:,.0f} تومان ذخیره شد")
     
     # تست بارگذاری
     history = load_history()
@@ -398,8 +404,8 @@ if __name__ == "__main__":
         last = get_last_price()
         prev = get_previous_price()
         change = get_price_change_percent()
-        print(f"💰 آخرین قیمت: {last:,.0f}")
-        print(f"💰 قیمت قبلی: {prev:,.0f}")
+        print(f"💰 آخرین قیمت: {last:,.0f} تومان")
+        print(f"💰 قیمت قبلی: {prev:,.0f} تومان")
         if change is not None:
             print(f"📊 تغییر: {change:.2f}%")
     
@@ -410,18 +416,3 @@ if __name__ == "__main__":
     # تست روند هفتگی
     weekly = get_weekly_trend()
     print(f"📈 روند هفتگی: {weekly['trend']} (تغییر: {weekly['change']:.2f}%)")
-    
-    # تست ذخیره سیگنال
-    test_signal = {
-        "price": 35_000_000,
-        "signal": "BUY",
-        "signal_text": "خرید",
-        "signal_confidence": 75,
-        "trend": "صعودی"
-    }
-    save_signal(test_signal)
-    print("✅ سیگنال تست ذخیره شد")
-    
-    # تست آمار
-    stats = get_signal_stats()
-    print(f"📊 آمار سیگنال‌ها: {stats}")
