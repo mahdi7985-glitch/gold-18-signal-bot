@@ -95,4 +95,184 @@ def get_latest_indicators(price_series: pd.Series) -> Optional[Tuple[pd.Series, 
 
     df = compute_indicators(candles)
     
-    # حذف ردی
+    # حذف ردیف‌های دارای NaN
+    required_cols = ["ema_fast", "ema_slow", "rsi", "macd", "macd_signal", "macd_hist", "adx"]
+    df_valid = df.dropna(subset=required_cols)
+    
+    if df_valid.empty:
+        return None
+
+    return df_valid.iloc[-1], df_valid
+
+
+# ============================================
+# دریافت تحلیل کامل (برای main)
+# ============================================
+def get_latest_analysis(price_series: pd.Series) -> Optional[Dict[str, Any]]:
+    """
+    دریافت تحلیل کامل با تمام اندیکاتورها و وضعیت‌ها.
+    
+    Args:
+        price_series: سری قیمت‌های خام
+    
+    Returns:
+        dict: اگر داده کافی باشد
+        None: اگر داده کافی نباشد
+    """
+    result = get_latest_indicators(price_series)
+    
+    if result is None:
+        return None
+    
+    last_row, df = result
+    
+    # ===== تشخیص وضعیت‌ها =====
+    # روند با EMA
+    if last_row["close"] > last_row["ema_fast"] and last_row["ema_fast"] > last_row["ema_slow"]:
+        trend = "صعودی"
+    elif last_row["close"] < last_row["ema_fast"] and last_row["ema_fast"] < last_row["ema_slow"]:
+        trend = "نزولی"
+    else:
+        trend = "خنثی"
+    
+    # وضعیت RSI
+    if last_row["rsi"] > config.RSI_OVERBOUGHT:
+        rsi_status = "اشباع خرید"
+    elif last_row["rsi"] < config.RSI_OVERSOLD:
+        rsi_status = "اشباع فروش"
+    else:
+        rsi_status = "متعادل"
+    
+    # وضعیت ADX
+    adx_status = "قوی" if last_row["adx"] > config.ADX_THRESHOLD else "ضعیف"
+    
+    # وضعیت MACD
+    if last_row["macd_hist"] > 0 and last_row["macd"] > last_row["macd_signal"]:
+        macd_status = "صعودی"
+    elif last_row["macd_hist"] < 0 and last_row["macd"] < last_row["macd_signal"]:
+        macd_status = "نزولی"
+    else:
+        macd_status = "خنثی"
+    
+    return {
+        "error": None,
+        "indicators": {
+            "ema_fast": last_row["ema_fast"],
+            "ema_slow": last_row["ema_slow"],
+            "rsi": last_row["rsi"],
+            "macd": last_row["macd"],
+            "macd_signal": last_row["macd_signal"],
+            "macd_hist": last_row["macd_hist"],
+            "adx": last_row["adx"],
+        },
+        "trend": trend,
+        "rsi_status": rsi_status,
+        "adx_status": adx_status,
+        "macd_status": macd_status,
+        "last_row": last_row,
+        "df": df,
+    }
+
+
+# ============================================
+# تابع حمایت و مقاومت (با دوره کوتاه‌تر)
+# ============================================
+def calculate_support_resistance(
+    price_series: pd.Series, 
+    period: int = 14,  # 🔧 تغییر از ۲۰ به ۱۴ برای سطوح نزدیک‌تر
+    multiplier: float = 1.5
+) -> Tuple[Optional[float], Optional[float]]:
+    """
+    محاسبه حمایت و مقاومت با استفاده از باندهای بولینگر
+    
+    Args:
+        price_series: سری قیمت‌ها
+        period: دوره محاسبه (پیش‌فرض ۱۴)
+        multiplier: ضریب انحراف معیار (پیش‌فرض ۱.۵)
+    
+    Returns:
+        tuple: (support, resistance) یا (None, None) اگر داده کافی نباشد
+    """
+    if len(price_series) < period:
+        return None, None
+    
+    # گرفتن آخرین 'period' قیمت
+    recent_prices = price_series.iloc[-period:]
+    
+    # محاسبه میانگین و انحراف معیار
+    mean = recent_prices.mean()
+    std = recent_prices.std()
+    
+    # محاسبه حمایت و مقاومت
+    support = mean - (multiplier * std)
+    resistance = mean + (multiplier * std)
+    
+    # اطمینان از منطقی بودن سطوح
+    last_price = price_series.iloc[-1]
+    
+    # اگر حمایت از قیمت فعلی بالاتر بود، اصلاح کن
+    if support > last_price:
+        support = last_price * 0.97
+    
+    # اگر مقاومت از قیمت فعلی پایین‌تر بود، اصلاح کن
+    if resistance < last_price:
+        resistance = last_price * 1.03
+    
+    # اگر حمایت و مقاومت خیلی نزدیک بودن، اصلاح کن
+    if support and resistance and (resistance - support) < (last_price * 0.02):
+        support = support * 0.98
+        resistance = resistance * 1.02
+    
+    return support, resistance
+
+
+# ============================================
+# توابع کمکی
+# ============================================
+def get_last_price(price_series: pd.Series) -> Optional[float]:
+    """دریافت آخرین قیمت از سری قیمت"""
+    if price_series.empty:
+        return None
+    return price_series.iloc[-1]
+
+
+def get_previous_price(price_series: pd.Series) -> Optional[float]:
+    """دریافت قیمت قبلی از سری قیمت"""
+    if len(price_series) < 2:
+        return None
+    return price_series.iloc[-2]
+
+
+# ============================================
+# تست
+# ============================================
+if __name__ == "__main__":
+    print("=" * 60)
+    print("📊 تست اندیکاتورها")
+    print("=" * 60)
+    
+    # تولید داده تست
+    np.random.seed(42)
+    dates = pd.date_range(end=pd.Timestamp.now(), periods=200, freq='1h')
+    prices = 35000000 + np.cumsum(np.random.randn(200) * 100000)
+    price_series = pd.Series(prices, index=dates)
+    
+    # تست تحلیل
+    analysis = get_latest_analysis(price_series)
+    
+    if analysis:
+        print("✅ تحلیل انجام شد")
+        print(f"💰 قیمت: {analysis['last_row']['close']/10:,.0f} تومان")
+        print(f"📈 روند: {analysis['trend']}")
+        print(f"📊 RSI: {analysis['indicators']['rsi']:.1f} ({analysis['rsi_status']})")
+        print(f"💪 ADX: {analysis['indicators']['adx']:.1f} ({analysis['adx_status']})")
+        print(f"📊 MACD: {analysis['macd_status']}")
+        
+        # تست حمایت و مقاومت
+        support, resistance = calculate_support_resistance(price_series, period=14)
+        if support and resistance:
+            print(f"\n📍 سطوح کلیدی (دوره ۱۴):")
+            print(f"  🛡️ حمایت: {support/10:,.0f} تومان")
+            print(f"  🚀 مقاومت: {resistance/10:,.0f} تومان")
+    else:
+        print("❌ داده کافی نیست")
