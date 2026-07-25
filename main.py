@@ -1,97 +1,3 @@
-import sys
-from datetime import datetime
-from typing import Optional, Dict, Any
-import pandas as pd
-
-from config import (
-    EMA_FAST, EMA_SLOW, RSI_LENGTH, MACD_FAST, MACD_SLOW, MACD_SIGNAL, ADX_LENGTH,
-    RSI_OVERBOUGHT, RSI_OVERSOLD, ADX_THRESHOLD, MIN_CANDLES_REQUIRED,
-    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BALE_BOT_TOKEN, BALE_CHAT_ID,
-    SHOW_LEVELS, SHOW_DOLLAR_OUNCE, SHOW_HISTORY, SHOW_DAILY_CHANGE
-)
-from gold_price_fetcher import get_gold_18k_price, PriceFetchError, get_all_prices_with_change
-from storage import (
-    append_price, load_history, trim_history, get_previous_price, save_signal,
-    get_recent_prices, get_weekly_trend, get_price_change_percent
-)
-from indicators import get_latest_analysis, build_ohlc_candles, calculate_support_resistance
-from signal_analyzer import analyze_with_friendly
-from telegram_notifier import send_telegram_message
-from bale_notifier import send_bale_message
-
-
-# ============================================
-# توابع کمکی برای فرمت‌دهی زمان (ایران)
-# ============================================
-PERSIAN_WEEKDAYS = {
-    0: "شنبه",
-    1: "یکشنبه",
-    2: "دوشنبه",
-    3: "سه شنبه",
-    4: "چهارشنبه",
-    5: "پنجشنبه",
-    6: "جمعه",
-}
-
-
-def get_jalali_now():
-    """دریافت تاریخ و زمان جلالی با منطقه زمانی ایران"""
-    from datetime import datetime as dt
-    from zoneinfo import ZoneInfo
-    import jdatetime
-    now = dt.now(ZoneInfo("Asia/Tehran"))
-    return jdatetime.datetime.fromgregorian(datetime=now)
-
-
-def format_jalali_datetime(jalali) -> str:
-    """فرمت تاریخ جلالی با نام روز هفته"""
-    weekday_name = PERSIAN_WEEKDAYS[jalali.weekday()]
-    return f"{weekday_name} {jalali.strftime('%Y/%m/%d')} | 🕒 {jalali.strftime('%H:%M')}"
-
-
-def get_iran_day() -> str:
-    """دریافت نام روز هفته به فارسی"""
-    from datetime import datetime as dt
-    from zoneinfo import ZoneInfo
-    days = {
-        0: "دوشنبه",
-        1: "سه‌شنبه",
-        2: "چهارشنبه",
-        3: "پنجشنبه",
-        4: "جمعه",
-        5: "شنبه",
-        6: "یکشنبه"
-    }
-    now = dt.now(ZoneInfo("Asia/Tehran"))
-    return days[now.weekday()]
-
-
-# ============================================
-# تابع ارسال به هر دو سرویس
-# ============================================
-def send_to_both(message: str, chat_id: Optional[str] = None) -> Dict[str, bool]:
-    """ارسال پیام به هر دو سرویس تلگرام و بله"""
-    results = {
-        "telegram": send_telegram_message(message, chat_id),
-        "bale": send_bale_message(message, chat_id)
-    }
-
-    success_count = sum(results.values())
-    if success_count == 2:
-        print("✅ پیام به هر دو سرویس (تلگرام و بله) ارسال شد.")
-    elif success_count == 1:
-        print("⚠️ پیام فقط به یکی از سرویس‌ها ارسال شد.")
-        failed = [k for k, v in results.items() if not v]
-        print(f"   سرویس‌های ناموفق: {', '.join(failed)}")
-    else:
-        print("❌ پیام به هیچکدام از سرویس‌ها ارسال نشد.")
-
-    return results
-
-
-# ============================================
-# تابع تولید گزارش کامل
-# ============================================
 def format_full_report(
     price: float,
     previous_price: Optional[float],
@@ -108,8 +14,7 @@ def format_full_report(
     jalali = get_jalali_now()
     day_name = get_iran_day()
     
-    # ===== قیمت‌ها (اصلاح شده) =====
-    # قیمت از قبل به تومان هست، دیگه تقسیم بر ۱۰ نمی‌کنیم
+    # ===== قیمت‌ها =====
     price_toman = price
     
     # ===== تاریخچه قیمت =====
@@ -123,9 +28,8 @@ def format_full_report(
     trend_word = "ثابت"
     
     if previous_price is not None and previous_price > 0:
-        prev_toman = previous_price / 10
+        prev_toman = previous_price
         change_amount = price - previous_price
-        change_toman = change_amount / 10
         change_percent = (change_amount / previous_price) * 100
         
         if change_amount > 0:
@@ -141,7 +45,7 @@ def format_full_report(
             trend_emoji = "🔻"
             trend_word = "نزول"
             if abs(change_percent) > 5:
-                advice = "😬 وای امروز ریزش سنگینی داشتیم! نترس، تو بازار این چیزا طبیعیه. بهترین خریدا همین موقعا انجام میشه."
+                advice = "😬 وای امروز ریزش سنگینی داشتیم! صبر کن تا بازار آروم بشه."
             elif abs(change_percent) > 2:
                 advice = "📉 یه ریزش معمولی، نگران نباش. بذار ببینیم کفش کجاست."
             else:
@@ -151,7 +55,7 @@ def format_full_report(
         
         change_text = f"""
 📊 دیروز این ساعت: **{prev_toman:,.0f}** تومان
-📉 تغییر: {trend_emoji} **{trend_word} {abs(change_toman):,.0f}** تومان ({abs(change_percent):.2f}%)
+📉 تغییر: {trend_emoji} **{trend_word} {abs(change_amount):,.0f}** تومان ({change_percent:.2f}%)
 """
     
     # ===== تاریخچه قیمت =====
@@ -177,21 +81,37 @@ def format_full_report(
     # ===== سیگنال =====
     signal_text = analysis.get("signal_text", "صبر کن")
     signal_emoji = analysis.get("signal_emoji", "🟡")
-    signal_confidence = analysis.get("signal_confidence", 0)
+    signal_confidence = analysis.get("signal_confidence", 35)
     trend = analysis.get("trend", "خنثی")
     signal_reason = analysis.get("signal_reason", "دلیل خاصی نداریم")
+    
+    # اگر اطمینان ۰ بود، به ۳۵ تغییر بده
+    if signal_confidence == 0:
+        signal_confidence = 35
+        signal_reason = "🔸 وضعیت نامشخص، بهتره صبر کنی تا بازار تکلیفش مشخص بشه."
     
     # ===== پیام دوستانه =====
     friendly = analysis.get("friendly", {})
     friendly_message = friendly.get("friendly_message", "🟡 صبر کن، فعلاً وقتش نیست.")
-    simple_reason = friendly.get("simple_reason", "")
     
     # ===== اندیکاتورها =====
     indicators = analysis.get("indicators", {})
+    rsi_val = indicators.get('rsi', 50)
+    
+    # ===== تنظیم متن حرف آخر بر اساس RSI =====
+    if "نزول" in trend_word or change_amount < 0:
+        if rsi_val > 70:
+            advice = "🔴 RSI اشباع خرید رو نشون میده. با توجه به ریزش امروز، احتمالاً این یه اصلاح موقتیه. بهتره صبر کنی تا قیمت به حمایت برسه و بعد تصمیم بگیری."
+        elif rsi_val < 30:
+            advice = "🟢 RSI اشباع فروش رو نشون میده. ممکنه کف نزدیک باشه، ولی بازم صبر کن تا برگشت رو تأیید کنی."
+        else:
+            advice = "🟡 بازار در منطقه تعادله. صبر کن ببینیم روند مشخص میشه."
     
     # ===== سطوح حمایت و مقاومت =====
     history = load_history()
-    support, resistance = calculate_support_resistance(history["price"])
+    support, resistance = calculate_support_resistance(history["price"], period=14)
+    support2 = support * 0.98 if support else None
+    resistance2 = resistance * 1.02 if resistance else None
     
     # ===== ساخت پیام =====
     message = f"""سلام رفیق! 👋
@@ -205,7 +125,7 @@ def format_full_report(
 {history_text}
 ━━━━━━━━━━━━━━━━━━━━
 
-🎯 نظر من (سیگنال):
+🎯 نظر من:
 {signal_emoji} **{signal_text}** (با {signal_confidence}% اطمینان)
 
 {signal_reason}
@@ -220,7 +140,6 @@ def format_full_report(
 • RSI: {indicators.get('rsi', 0):.1f} """
 
     # توضیح RSI
-    rsi_val = indicators.get('rsi', 50)
     if rsi_val > 70:
         message += "🔴 اشباع خرید\n"
     elif rsi_val < 30:
@@ -246,19 +165,23 @@ def format_full_report(
         else:
             message += "• مکدی: منفی 📉 (مومنتوم نزولی)\n"
     
-    # ===== سطوح کلیدی =====
+    # ===== سطوح کلیدی با فاصله درصدی =====
     if SHOW_LEVELS and support and resistance:
+        # محاسبه فاصله درصدی
+        dist_to_support = ((price - support) / price) * 100
+        dist_to_resistance = ((resistance - price) / price) * 100
+        
         message += f"""
 ━━━━━━━━━━━━━━━━━━━━
 📍 سطح‌های مهم امروز:
 
 اگه بره پایین‌تر:
-🛡️ **حمایت اول:** {support/10:,.0f} تومان
-🛡️ **حمایت دوم:** {support * 0.98 / 10:,.0f} تومان (اگه بشکنه می‌ره پایین‌تر)
+🛡️ **حمایت اول:** {support/10:,.0f} تومان ({dist_to_support:.1f}% پایین‌تر)
+🛡️ **حمایت دوم:** {support2/10:,.0f} تومان ({dist_to_support + 2:.1f}% پایین‌تر)
 
 اگه برگرده بالا:
-🚀 **مقاومت اول:** {resistance/10:,.0f} تومان
-🚀 **مقاومت دوم:** {resistance * 1.02 / 10:,.0f} تومان (اگه پاس کنه می‌ره بالاتر)
+🚀 **مقاومت اول:** {resistance/10:,.0f} تومان ({dist_to_resistance:.1f}% بالاتر)
+🚀 **مقاومت دوم:** {resistance2/10:,.0f} تومان ({dist_to_resistance + 2:.1f}% بالاتر)
 """
     
     # ===== دلار و انس =====
@@ -285,143 +208,12 @@ def format_full_report(
                 else:
                     message += "🔻 تأثیر روی طلا: **منفی** (هر دو نزولی)"
     
-    # ===== حرف آخر =====
+    # ===== حرف آخر (بدون عبارت اضافی) =====
     message += f"""
 ━━━━━━━━━━━━━━━━━━━━
 🗣️ حرف آخر:
 
 {advice}
-
-هر سوالی داری، بپرس. کنارت هستم 🤝
 """
     
     return message
-
-
-def format_collecting_data_message(price: float, have: int, need: int) -> str:
-    """پیام در حال جمع‌آوری داده"""
-    jalali = get_jalali_now()
-    price_toman = price / 10
-    day_name = get_iran_day()
-    
-    return f"""سلام رفیق! 👋
-در حال راه‌اندازی تحلیلگر طلا هستم...
-
-📅 {format_jalali_datetime(jalali)}
-📍 {day_name}
-
-💰 قیمت لحظه‌ای: **{price_toman:,.0f}** تومان
-
-⏳ در حال جمع‌آوری داده برای تحلیل تکنیکال ({have}/{need} کندل).
-
-📊 هر چی داده بیشتر باشه، تحلیل دقیق‌تر میشه.
-به‌محض کافی‌شدن داده، گزارش کامل رو برات می‌فرستم.
-
-صبر کن تا بهت خبر بدم 🤝
-"""
-
-
-# ============================================
-# تابع اصلی fetch_and_send_report
-# ============================================
-def fetch_and_send_report(chat_id: Optional[str] = None) -> Dict[str, bool]:
-    """
-    دریافت قیمت و ارسال گزارش کامل با دلار و انس
-    """
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] شروع دریافت گزارش...")
-
-    try:
-        price = get_gold_18k_price()
-    except PriceFetchError as exc:
-        print(f"[ERROR] دریافت قیمت ناموفق بود: {exc}", file=sys.stderr)
-        return {"telegram": False, "bale": False}
-
-    print(f"[INFO] قیمت دریافت‌شده: {price:,.0f} تومان")
-
-    # دریافت دلار و انس
-    all_data = get_all_prices_with_change()
-    dollar_price = all_data.get('dollar', 0)
-    dollar_change = all_data.get('dollar_change', 0)
-    ounce_price = all_data.get('ounce', 0)
-    ounce_change = all_data.get('ounce_change', 0)
-
-    # ذخیره در تاریخچه
-    append_price(price)
-    trim_history()
-
-    # دریافت قیمت قبلی
-    previous_price = get_previous_price()
-    
-    # دریافت تاریخچه و تحلیل
-    history = load_history()
-    analysis_result = get_latest_analysis(history["price"])
-    
-    # اگر تحلیل نداریم
-    if analysis_result is None:
-        candles_count = len(build_ohlc_candles(history["price"]))
-        message = format_collecting_data_message(
-            price, 
-            candles_count, 
-            MIN_CANDLES_REQUIRED
-        )
-        result = send_to_both(message, chat_id)
-        return result
-    
-    # اضافه کردن خروجی دوستانه به تحلیل
-    from signal_analyzer import analyze_with_friendly
-    df = analysis_result.get("df")
-    if df is not None:
-        friendly_result = analyze_with_friendly(df)
-        analysis_result['friendly'] = friendly_result.get('friendly', {})
-    
-    # ساخت گزارش کامل
-    message = format_full_report(
-        price, 
-        previous_price, 
-        analysis_result,
-        dollar_price,
-        dollar_change,
-        ounce_price,
-        ounce_change
-    )
-    
-    print(f"[INFO] سیگنال: {analysis_result.get('signal', 'WAIT')} | اطمینان: {analysis_result.get('signal_confidence', 0)}%")
-    
-    # ذخیره سیگنال در تاریخچه
-    try:
-        signal_data = {
-            "price": price,
-            "signal": analysis_result.get("signal", "WAIT"),
-            "signal_text": analysis_result.get("signal_text", ""),
-            "signal_confidence": analysis_result.get("signal_confidence", 0),
-            "trend": analysis_result.get("trend", ""),
-        }
-        save_signal(signal_data)
-    except Exception as e:
-        print(f"⚠️ خطا در ذخیره سیگنال: {e}")
-    
-    # ارسال به هر دو
-    result = send_to_both(message, chat_id)
-    return result
-
-
-def run(chat_id: Optional[str] = None) -> Dict[str, bool]:
-    """
-    نقطه ورود اصلی
-    """
-    # بررسی تنظیمات
-    if not TELEGRAM_BOT_TOKEN and not BALE_BOT_TOKEN:
-        print("[ERROR] هیچ سرویسی (تلگرام یا بله) تنظیم نشده است!", file=sys.stderr)
-        return {"telegram": False, "bale": False}
-    
-    if TELEGRAM_BOT_TOKEN and not TELEGRAM_CHAT_ID:
-        print("[WARNING] TELEGRAM_BOT_TOKEN تنظیم شده ولی TELEGRAM_CHAT_ID خالی است!")
-    
-    if BALE_BOT_TOKEN and not BALE_CHAT_ID:
-        print("[WARNING] BALE_BOT_TOKEN تنظیم شده ولی BALE_CHAT_ID خالی است!")
-
-    return fetch_and_send_report(chat_id)
-
-
-if __name__ == "__main__":
-    run()
