@@ -1,3 +1,97 @@
+import sys
+from datetime import datetime
+from typing import Optional, Dict, Any  # ← اضافه شد
+import pandas as pd
+
+from config import (
+    EMA_FAST, EMA_SLOW, RSI_LENGTH, MACD_FAST, MACD_SLOW, MACD_SIGNAL, ADX_LENGTH,
+    RSI_OVERBOUGHT, RSI_OVERSOLD, ADX_THRESHOLD, MIN_CANDLES_REQUIRED,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BALE_BOT_TOKEN, BALE_CHAT_ID,
+    SHOW_LEVELS, SHOW_DOLLAR_OUNCE, SHOW_HISTORY, SHOW_DAILY_CHANGE
+)
+from gold_price_fetcher import get_gold_18k_price, PriceFetchError, get_all_prices_with_change
+from storage import (
+    append_price, load_history, trim_history, get_previous_price, save_signal,
+    get_recent_prices, get_weekly_trend, get_price_change_percent
+)
+from indicators import get_latest_analysis, build_ohlc_candles, calculate_support_resistance
+from signal_analyzer import analyze_with_friendly
+from telegram_notifier import send_telegram_message
+from bale_notifier import send_bale_message
+
+
+# ============================================
+# توابع کمکی برای فرمت‌دهی زمان (ایران)
+# ============================================
+PERSIAN_WEEKDAYS = {
+    0: "شنبه",
+    1: "یکشنبه",
+    2: "دوشنبه",
+    3: "سه شنبه",
+    4: "چهارشنبه",
+    5: "پنجشنبه",
+    6: "جمعه",
+}
+
+
+def get_jalali_now():
+    """دریافت تاریخ و زمان جلالی با منطقه زمانی ایران"""
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    import jdatetime
+    now = dt.now(ZoneInfo("Asia/Tehran"))
+    return jdatetime.datetime.fromgregorian(datetime=now)
+
+
+def format_jalali_datetime(jalali) -> str:
+    """فرمت تاریخ جلالی با نام روز هفته"""
+    weekday_name = PERSIAN_WEEKDAYS[jalali.weekday()]
+    return f"{weekday_name} {jalali.strftime('%Y/%m/%d')} | 🕒 {jalali.strftime('%H:%M')}"
+
+
+def get_iran_day() -> str:
+    """دریافت نام روز هفته به فارسی"""
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    days = {
+        0: "دوشنبه",
+        1: "سه‌شنبه",
+        2: "چهارشنبه",
+        3: "پنجشنبه",
+        4: "جمعه",
+        5: "شنبه",
+        6: "یکشنبه"
+    }
+    now = dt.now(ZoneInfo("Asia/Tehran"))
+    return days[now.weekday()]
+
+
+# ============================================
+# تابع ارسال به هر دو سرویس
+# ============================================
+def send_to_both(message: str, chat_id: Optional[str] = None) -> Dict[str, bool]:
+    """ارسال پیام به هر دو سرویس تلگرام و بله"""
+    results = {
+        "telegram": send_telegram_message(message, chat_id),
+        "bale": send_bale_message(message, chat_id)
+    }
+
+    success_count = sum(results.values())
+    if success_count == 2:
+        print("✅ پیام به هر دو سرویس (تلگرام و بله) ارسال شد.")
+    elif success_count == 1:
+        print("⚠️ پیام فقط به یکی از سرویس‌ها ارسال شد.")
+        failed = [k for k, v in results.items() if not v]
+        print(f"   سرویس‌های ناموفق: {', '.join(failed)}")
+    else:
+        print("❌ پیام به هیچکدام از سرویس‌ها ارسال نشد.")
+
+    return results
+
+
+# ============================================
+# تابع تولید گزارش کامل
+# ============================================
 def format_full_report(
     price: float,
     previous_price: Optional[float],
@@ -17,37 +111,9 @@ def format_full_report(
     # ===== قیمت‌ها =====
     price_toman = price / 10
     
-    # ===== تاریخچه قیمت (۵ روز اخیر برای روند هفتگی) =====
-    history = load_history()
-    price_history = history["price"]
-    recent_prices = []
-    weekly_trend = ""
-    
-    if len(price_history) >= 5:
-        recent_prices = [
-            price_history[-1] / 10,  # دیروز
-            price_history[-2] / 10,  # پریروز
-            price_history[-3] / 10,  # ۳ روز پیش
-            price_history[-4] / 10,  # ۴ روز پیش
-            price_history[-5] / 10,  # ۵ روز پیش
-        ]
-        
-        # محاسبه روند هفتگی
-        weekly_high = max(recent_prices)
-        weekly_low = min(recent_prices)
-        weekly_range = ((weekly_high - weekly_low) / weekly_low) * 100
-        weekly_trend = f"📈 روند هفتگی: از {weekly_low:,.0f} به {weekly_high:,.0f} اومده بود"
-        if price_toman < weekly_high * 0.98:
-            weekly_trend += f"، الان داره اصلاح می‌کنه"
-        elif price_toman > weekly_low * 1.02:
-            weekly_trend += f"، داره از کف فاصله می‌گیره"
-        else:
-            weekly_trend += f"، در محدوده تعادل"
-    elif len(price_history) >= 2:
-        recent_prices = [price_history[-1] / 10, price_history[-2] / 10]
-        weekly_trend = f"📈 روند کوتاه‌مدت: از {recent_prices[1]:,.0f} به {recent_prices[0]:,.0f}"
-    else:
-        weekly_trend = "📈 روند: داده کافی برای تحلیل هفتگی نیست"
+    # ===== تاریخچه قیمت =====
+    recent_prices = get_recent_prices(5)
+    weekly_trend_data = get_weekly_trend()
     
     # ===== تغییرات =====
     change_text = ""
@@ -89,116 +155,44 @@ def format_full_report(
     
     # ===== تاریخچه قیمت =====
     history_text = ""
-    if len(recent_prices) >= 5:
-        history_text = f"""
-📅 قیمت‌های اخیر:
-• امروز: {price_toman:,.0f} تومان
-• دیروز: {recent_prices[0]:,.0f} تومان
-• پریروز: {recent_prices[1]:,.0f} تومان
-• ۳ روز پیش: {recent_prices[2]:,.0f} تومان
-• ۴ روز پیش: {recent_prices[3]:,.0f} تومان
-• ۵ روز پیش: {recent_prices[4]:,.0f} تومان
-"""
-    elif len(recent_prices) >= 2:
-        history_text = f"""
-📅 قیمت‌های اخیر:
-• امروز: {price_toman:,.0f} تومان
-• دیروز: {recent_prices[0]:,.0f} تومان
-"""
+    if SHOW_HISTORY and len(recent_prices) >= 2:
+        history_text = "\n📅 قیمت‌های اخیر:\n"
+        labels = ["امروز", "دیروز", "پریروز", "۳ روز پیش", "۴ روز پیش", "۵ روز پیش"]
+        for i, (label, price_val) in enumerate(zip(labels, recent_prices)):
+            if i == 0:
+                history_text += f"• {label}: {price_val:,.0f} تومان\n"
+            elif i < len(recent_prices):
+                history_text += f"• {label}: {recent_prices[i]:,.0f} تومان\n"
+    
+    # ===== روند هفتگی =====
+    weekly_text = ""
+    if weekly_trend_data['trend'] != "داده کافی نیست":
+        weekly_text = f"📈 روند هفتگی: از {weekly_trend_data['start']:,.0f} به {weekly_trend_data['end']:,.0f}"
+        if weekly_trend_data['change'] > 0:
+            weekly_text += f" (صعود {weekly_trend_data['change']:.1f}%)"
+        else:
+            weekly_text += f" (نزول {abs(weekly_trend_data['change']):.1f}%)"
     
     # ===== سیگنال =====
     signal_text = analysis.get("signal_text", "صبر کن")
     signal_emoji = analysis.get("signal_emoji", "🟡")
-    signal_confidence = analysis.get("signal_confidence", 45)
+    signal_confidence = analysis.get("signal_confidence", 0)
     trend = analysis.get("trend", "خنثی")
     signal_reason = analysis.get("signal_reason", "دلیل خاصی نداریم")
-    score = analysis.get("score", 0)
+    
+    # ===== پیام دوستانه =====
+    friendly = analysis.get("friendly", {})
+    friendly_message = friendly.get("friendly_message", "🟡 صبر کن، فعلاً وقتش نیست.")
+    simple_reason = friendly.get("simple_reason", "")
     
     # ===== اندیکاتورها =====
     indicators = analysis.get("indicators", {})
     
     # ===== سطوح حمایت و مقاومت =====
-    support, resistance = calculate_support_resistance(price, price_history)
-    support2, resistance2 = None, None
+    history = load_history()
+    support, resistance = calculate_support_resistance(history["price"])
     
-    # سطوح دوم (برای پیش‌بینی)
-    if support and resistance:
-        support2 = support * 0.98
-        resistance2 = resistance * 1.02
-    
-    # ===== متن دوستانه برای سیگنال =====
-    friendly_messages = {
-        "خرید": "🚀 رفیق، امروز روز خوبیه! همه چیز داره هموار میشه برای یه رشد خوب. ولی یادت باشه هیچوقت یه‌دفعه همه سرمایه‌ات رو نریزی تو کار.",
-        "فروش": "⚠️ راستش امروز اوضاع خوش‌یمن نیست. اگه طلا داری، شاید بهتر باشه یه کم بفروشی و نقد شی. ولی این تصمیم با خودته عزیزم.",
-        "صبر کن": "🤔 امروز یه وضعیت دو پهلو داریم. من که دست نگه می‌دارم، تو هم عجله نکن. فردا صبح دوباره چک می‌کنیم.",
-        "صبر با تمایل به خرید": "🟡 امروز نه خریداریم نه فروشنده، ولی یه کم به خرید مایل‌ترم. اگه قیمت یه کم پایین‌تر بیاد، شاید وقتش باشه.",
-        "صبر با تمایل به فروش": "🟠 امروز کمی نگران‌کننده‌ست. اگه طلا داری، شاید بهتر باشه یه کم صبر کنی ببینی چی میشه. عجله نکن.",
-    }
-    friendly_message = friendly_messages.get(signal_text, "🟡 صبر کن، فعلاً وقتش نیست.")
-    
-    # ===== توضیح دلایل سیگنال به زبان ساده =====
-    reason_text = ""
-    reasons_list = []
-    
-    # تحلیل EMA
-    ema_fast = indicators.get('ema_fast', 0)
-    ema_slow = indicators.get('ema_slow', 0)
-    if ema_fast and ema_slow:
-        if price > ema_fast:
-            reasons_list.append(f"قیمت از میانگین ۲۰ روزه ({ema_fast/10:,.0f}) بالاتر")
-            if price > ema_slow:
-                reasons_list.append(f"و از میانگین ۵۰ روزه ({ema_slow/10:,.0f}) بالاتر")
-            else:
-                reasons_list.append(f"ولی از میانگین ۵۰ روزه ({ema_slow/10:,.0f}) پایین‌تر")
-        else:
-            reasons_list.append(f"قیمت از میانگین ۲۰ روزه ({ema_fast/10:,.0f}) پایین‌تر")
-            if price < ema_slow:
-                reasons_list.append(f"و از میانگین ۵۰ روزه ({ema_slow/10:,.0f}) پایین‌تر")
-            else:
-                reasons_list.append(f"ولی از میانگین ۵۰ روزه ({ema_slow/10:,.0f}) بالاتر")
-    
-    # تحلیل RSI
-    rsi_val = indicators.get('rsi', 50)
-    if rsi_val:
-        if rsi_val > 70:
-            reasons_list.append(f"RSI اشباع خرید ({rsi_val:.1f})، بازار نیاز به نفس‌گیری داره")
-        elif rsi_val < 30:
-            reasons_list.append(f"RSI اشباع فروش ({rsi_val:.1f})، احتمال برگشت")
-        elif 40 < rsi_val < 60:
-            reasons_list.append(f"RSI متعادل ({rsi_val:.1f})")
-        else:
-            reasons_list.append(f"RSI در محدوده {rsi_val:.1f}")
-    
-    # تحلیل MACD
-    if 'macd' in indicators and 'macd_signal' in indicators:
-        macd_diff = indicators['macd'] - indicators['macd_signal']
-        if macd_diff > 0:
-            reasons_list.append("مومنتوم صعودی (مکدی مثبت)")
-        else:
-            reasons_list.append("مومنتوم نزولی (مکدی منفی)")
-    
-    # ترکیب دلایل
-    if reasons_list:
-        reason_text = "چرا؟\n" + "\n".join([f"• {r}" for r in reasons_list[:4]])
-        if len(reasons_list) > 4:
-            reason_text += f"\n• و {len(reasons_list)-4} مورد دیگه..."
-    
-    # ===== فاصله قیمت از EMA =====
-    ema_distance_text = ""
-    if ema_fast:
-        distance = ((price - ema_fast) / ema_fast) * 100
-        if abs(distance) > 3:
-            ema_distance_text = f"قیمت {abs(distance):.1f}٪ از میانگین ۲۰ روزه فاصله داره"
-            if distance > 3:
-                ema_distance_text += " (کشیدگی به بالا)"
-            else:
-                ema_distance_text += " (کشیدگی به پایین)"
-        elif abs(distance) > 1:
-            ema_distance_text = f"قیمت {abs(distance):.1f}٪ از میانگین ۲۰ روزه فاصله داره (تعادل نسبی)"
-        else:
-            ema_distance_text = "قیمت روی میانگین ۲۰ روزه (تعادل کامل)"
-    
-    # ===== ساخت پیام نهایی =====
+    # ===== ساخت پیام =====
     message = f"""سلام رفیق! 👋
 برات تحلیل امروز طلا رو گرفتم:
 
@@ -206,11 +200,12 @@ def format_full_report(
 ━━━━━━━━━━━━━━━━━━━━
 💰 قیمت الان: **{price_toman:,.0f}** تومان
 {change_text}
-{weekly_trend}
+{weekly_text}
+{history_text}
 ━━━━━━━━━━━━━━━━━━━━
 
 🎯 نظر من (سیگنال):
-{signal_emoji} **{signal_text}** (با {signal_confidence}٪ اطمینان)
+{signal_emoji} **{signal_text}** (با {signal_confidence}% اطمینان)
 
 {signal_reason}
 
@@ -219,58 +214,75 @@ def format_full_report(
 ━━━━━━━━━━━━━━━━━━━━
 📊 یه نگاه به اعداد بندازیم:
 
-• میانگین ۲۰ روزه: {ema_fast/10:,.0f} تومان ({'بالاتر از قیمت' if price < ema_fast else 'پایین‌تر از قیمت'})
-• میانگین ۵۰ روزه: {ema_slow/10:,.0f} تومان ({'بالاتر از قیمت' if price < ema_slow else 'پایین‌تر از قیمت'})
-• RSI: {rsi_val:.1f} {'🔴 اشباع خرید' if rsi_val > 70 else '🟢 اشباع فروش' if rsi_val < 30 else '🟡 متعادل'}
-• قدرت روند (ADX): {indicators.get('adx', 0):.1f} {'💪 قوی' if indicators.get('adx', 0) > 25 else '🤔 متوسط' if indicators.get('adx', 0) > 20 else '😶 ضعیف'}
-• مکدی: {'مثبت 📈' if indicators.get('macd', 0) > indicators.get('macd_signal', 0) else 'منفی 📉'}
-{ema_distance_text}
+• میانگین ۲۰ روزه: {indicators.get('ema_fast', 0)/10:,.0f} تومان
+• میانگین ۵۰ روزه: {indicators.get('ema_slow', 0)/10:,.0f} تومان
+• RSI: {indicators.get('rsi', 0):.1f} """
 
+    # توضیح RSI
+    rsi_val = indicators.get('rsi', 50)
+    if rsi_val > 70:
+        message += "🔴 اشباع خرید\n"
+    elif rsi_val < 30:
+        message += "🟢 اشباع فروش\n"
+    else:
+        message += "🟡 متعادل\n"
+    
+    message += f"""• قدرت روند (ADX): {indicators.get('adx', 0):.1f} """
+    
+    # توضیح ADX
+    adx_val = indicators.get('adx', 0)
+    if adx_val > 25:
+        message += "💪 قوی\n"
+    elif adx_val > 20:
+        message += "🤔 متوسط\n"
+    else:
+        message += "😶 ضعیف\n"
+    
+    # MACD
+    if 'macd' in indicators and 'macd_signal' in indicators:
+        if indicators['macd'] > indicators['macd_signal']:
+            message += "• مکدی: مثبت 📈 (مومنتوم صعودی)\n"
+        else:
+            message += "• مکدی: منفی 📉 (مومنتوم نزولی)\n"
+    
+    # ===== سطوح کلیدی =====
+    if SHOW_LEVELS and support and resistance:
+        message += f"""
 ━━━━━━━━━━━━━━━━━━━━
 📍 سطح‌های مهم امروز:
-"""
 
-    # سطوح حمایت و مقاومت
-    if support and resistance:
-        message += f"""
 اگه بره پایین‌تر:
-🛡️ **حمایت اول:** {support/10:,.0f} تومان"""
-        if support2:
-            message += f"""
-🛡️ **حمایت دوم:** {support2/10:,.0f} تومان (اگه بشکنه می‌ره پایین‌تر)"""
-        
-        message += f"""
+🛡️ **حمایت اول:** {support/10:,.0f} تومان
+🛡️ **حمایت دوم:** {support * 0.98 / 10:,.0f} تومان (اگه بشکنه می‌ره پایین‌تر)
 
 اگه برگرده بالا:
-🚀 **مقاومت اول:** {resistance/10:,.0f} تومان"""
-        if resistance2:
-            message += f"""
-🚀 **مقاومت دوم:** {resistance2/10:,.0f} تومان (اگه پاس کنه می‌ره بالاتر)"""
+🚀 **مقاومت اول:** {resistance/10:,.0f} تومان
+🚀 **مقاومت دوم:** {resistance * 1.02 / 10:,.0f} تومان (اگه پاس کنه می‌ره بالاتر)
+"""
     
-    # ===== فاکتورهای کلیدی (دلار و انس) =====
-    dollar_text = ""
-    if dollar_price is not None:
+    # ===== دلار و انس =====
+    if SHOW_DOLLAR_OUNCE and dollar_price:
         dollar_emoji = "🟢" if dollar_change and dollar_change > 0 else "🔻" if dollar_change and dollar_change < 0 else "⚪"
-        dollar_text = f"""
+        message += f"""
 ━━━━━━━━━━━━━━━━━━━━
 💎 دو تا فاکتور مهم دیگه:
 
 💵 دلار آزاد: {dollar_price:,.0f} تومان ({dollar_emoji} {'صعودی' if dollar_change and dollar_change > 0 else 'نزولی' if dollar_change and dollar_change < 0 else 'ثابت'})
 """
-        if ounce_price is not None:
+        if ounce_price:
             ounce_emoji = "🟢" if ounce_change and ounce_change > 0 else "🔻" if ounce_change and ounce_change < 0 else "⚪"
-            dollar_text += f"""🏅 انس جهانی: ${ounce_price:,.2f} ({ounce_emoji} {'صعودی' if ounce_change and ounce_change > 0 else 'نزولی' if ounce_change and ounce_change < 0 else 'ثابت'})
+            message += f"""🏅 انس جهانی: ${ounce_price:,.2f} ({ounce_emoji} {'صعودی' if ounce_change and ounce_change > 0 else 'نزولی' if ounce_change and ounce_change < 0 else 'ثابت'})
 """
             # تأثیر ترکیبی
             if dollar_change and ounce_change:
                 if dollar_change > 0 and ounce_change > 0:
-                    dollar_text += "🔺 تأثیر روی طلا: **مثبت قوی** (هر دو صعودی)"
+                    message += "🔺 تأثیر روی طلا: **مثبت قوی** (هر دو صعودی)"
                 elif dollar_change > 0 and ounce_change < 0:
-                    dollar_text += "🔄 تأثیر روی طلا: **مختلط** (دلار بالا، انس پایین)"
+                    message += "🔄 تأثیر روی طلا: **مختلط** (دلار بالا، انس پایین)"
                 elif dollar_change < 0 and ounce_change > 0:
-                    dollar_text += "🔄 تأثیر روی طلا: **مختلط** (دلار پایین، انس بالا)"
+                    message += "🔄 تأثیر روی طلا: **مختلط** (دلار پایین، انس بالا)"
                 else:
-                    dollar_text += "🔻 تأثیر روی طلا: **منفی** (هر دو نزولی)"
+                    message += "🔻 تأثیر روی طلا: **منفی** (هر دو نزولی)"
     
     # ===== حرف آخر =====
     message += f"""
@@ -283,3 +295,132 @@ def format_full_report(
 """
     
     return message
+
+
+def format_collecting_data_message(price: float, have: int, need: int) -> str:
+    """پیام در حال جمع‌آوری داده"""
+    jalali = get_jalali_now()
+    price_toman = price / 10
+    day_name = get_iran_day()
+    
+    return f"""سلام رفیق! 👋
+در حال راه‌اندازی تحلیلگر طلا هستم...
+
+📅 {format_jalali_datetime(jalali)}
+📍 {day_name}
+
+💰 قیمت لحظه‌ای: **{price_toman:,.0f}** تومان
+
+⏳ در حال جمع‌آوری داده برای تحلیل تکنیکال ({have}/{need} کندل).
+
+📊 هر چی داده بیشتر باشه، تحلیل دقیق‌تر میشه.
+به‌محض کافی‌شدن داده، گزارش کامل رو برات می‌فرستم.
+
+صبر کن تا بهت خبر بدم 🤝
+"""
+
+
+# ============================================
+# تابع اصلی fetch_and_send_report
+# ============================================
+def fetch_and_send_report(chat_id: Optional[str] = None) -> Dict[str, bool]:
+    """
+    دریافت قیمت و ارسال گزارش کامل با دلار و انس
+    """
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] شروع دریافت گزارش...")
+
+    try:
+        price = get_gold_18k_price()
+    except PriceFetchError as exc:
+        print(f"[ERROR] دریافت قیمت ناموفق بود: {exc}", file=sys.stderr)
+        return {"telegram": False, "bale": False}
+
+    print(f"[INFO] قیمت دریافت‌شده: {price/10:,.0f} تومان")
+
+    # دریافت دلار و انس
+    all_data = get_all_prices_with_change()
+    dollar_price = all_data.get('dollar', 0)
+    dollar_change = all_data.get('dollar_change', 0)
+    ounce_price = all_data.get('ounce', 0)
+    ounce_change = all_data.get('ounce_change', 0)
+
+    # ذخیره در تاریخچه
+    append_price(price)
+    trim_history()
+
+    # دریافت قیمت قبلی
+    previous_price = get_previous_price()
+    
+    # دریافت تاریخچه و تحلیل
+    history = load_history()
+    analysis_result = get_latest_analysis(history["price"])
+    
+    # اگر تحلیل نداریم
+    if analysis_result is None:
+        candles_count = len(build_ohlc_candles(history["price"]))
+        message = format_collecting_data_message(
+            price, 
+            candles_count, 
+            MIN_CANDLES_REQUIRED
+        )
+        result = send_to_both(message, chat_id)
+        return result
+    
+    # اضافه کردن خروجی دوستانه به تحلیل
+    from signal_analyzer import analyze_with_friendly
+    df = analysis_result.get("df")
+    if df is not None:
+        friendly_result = analyze_with_friendly(df)
+        analysis_result['friendly'] = friendly_result.get('friendly', {})
+    
+    # ساخت گزارش کامل
+    message = format_full_report(
+        price, 
+        previous_price, 
+        analysis_result,
+        dollar_price,
+        dollar_change,
+        ounce_price,
+        ounce_change
+    )
+    
+    print(f"[INFO] سیگنال: {analysis_result.get('signal', 'WAIT')} | اطمینان: {analysis_result.get('signal_confidence', 0)}%")
+    
+    # ذخیره سیگنال در تاریخچه
+    try:
+        signal_data = {
+            "price": price,
+            "signal": analysis_result.get("signal", "WAIT"),
+            "signal_text": analysis_result.get("signal_text", ""),
+            "signal_confidence": analysis_result.get("signal_confidence", 0),
+            "trend": analysis_result.get("trend", ""),
+        }
+        save_signal(signal_data)
+    except Exception as e:
+        print(f"⚠️ خطا در ذخیره سیگنال: {e}")
+    
+    # ارسال به هر دو
+    result = send_to_both(message, chat_id)
+    return result
+
+
+def run(chat_id: Optional[str] = None) -> Dict[str, bool]:
+    """
+    نقطه ورود اصلی
+    """
+    # بررسی تنظیمات
+    if not TELEGRAM_BOT_TOKEN and not BALE_BOT_TOKEN:
+        print("[ERROR] هیچ سرویسی (تلگرام یا بله) تنظیم نشده است!", file=sys.stderr)
+        return {"telegram": False, "bale": False}
+    
+    if TELEGRAM_BOT_TOKEN and not TELEGRAM_CHAT_ID:
+        print("[WARNING] TELEGRAM_BOT_TOKEN تنظیم شده ولی TELEGRAM_CHAT_ID خالی است!")
+    
+    if BALE_BOT_TOKEN and not BALE_CHAT_ID:
+        print("[WARNING] BALE_BOT_TOKEN تنظیم شده ولی BALE_CHAT_ID خالی است!")
+
+    return fetch_and_send_report(chat_id)
+
+
+if __name__ == "__main__":
+    run()
