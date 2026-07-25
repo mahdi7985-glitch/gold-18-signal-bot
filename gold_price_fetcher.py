@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from typing import Optional, Tuple, Dict, Any
 from datetime import datetime
 import time
+import re
 
 from config import GOLD_18K_URL, USE_MOCK_PRICE
 
@@ -17,10 +18,14 @@ HEADERS = {
     "Connection": "keep-alive",
 }
 
-# آخرین قیمت موک‌شده، برای تولید یک random-walk واقع‌نمایانه بین اجراها
-last_mock_price = 35_000_000.0  # تومان به ازای هر گرم (فقط مقدار اولیه‌ی نمونه)
-last_mock_dollar = 850_000.0  # تومان به ازای هر دلار
-last_mock_ounce = 2400.0  # دلار به ازای هر اونس
+# موک‌ها برای تست
+last_mock_price = 35_000_000.0  # تومان
+last_mock_dollar = 850_000.0    # تومان
+last_mock_ounce = 2400.0        # دلار
+
+# تاریخچه برای محاسبه تغییرات (فقط برای دلار و اونس)
+_dollar_history = []
+_ounce_history = []
 
 
 class PriceFetchError(Exception):
@@ -47,7 +52,6 @@ def _parse_price_text(text: str) -> float:
 
 def _extract_number_from_text(text: str) -> Optional[float]:
     """استخراج عدد از متن (برای مواقعی که قیمت در متن پنهان شده)"""
-    import re
     numbers = re.findall(r'[\d,]+', text.replace(",", ""))
     if numbers:
         try:
@@ -61,7 +65,7 @@ def _extract_number_from_text(text: str) -> Optional[float]:
 # دریافت قیمت از منابع مختلف
 # ============================================
 def _fetch_from_tgju(url: str = None) -> float:
-    """قیمت طلای ۱۸ عیار را از صفحه‌ی tgju.org استخراج می‌کند."""
+    """قیمت طلای ۱۸ عیار را از صفحه‌ی tgju.org استخراج می‌کند (خروجی به ریال)."""
     url = url or GOLD_18K_URL
     
     try:
@@ -91,15 +95,24 @@ def _fetch_from_tgju(url: str = None) -> float:
             except ValueError:
                 continue
     
-    # اگر با سلکتورها پیدا نشد، جستجوی کلی در متن
+    # اگر با سلکتورها پیدا نشد، جستجوی کلی در متن (بهبودیافته)
     all_text = soup.get_text()
-    numbers = [float(n.replace(",", "")) for n in all_text.split() 
-               if n.replace(",", "").replace(".", "").isdigit() and len(n) > 4]
+    numbers = []
+    for word in all_text.split():
+        cleaned = word.replace(",", "").replace("٬", "")
+        if cleaned.replace(".", "").isdigit() and len(cleaned) > 4:
+            try:
+                numbers.append(float(cleaned))
+            except:
+                continue
     
     if numbers:
-        # معمولاً قیمت طلا عدد بزرگ است
-        probable_price = max(numbers)  # بزرگترین عدد را به عنوان قیمت در نظر بگیر
-        if probable_price > 100000:  # باید بالای ۱۰۰ هزار تومان باشد
+        # فقط اعداد بزرگتر از ۱۰۰ هزار رو در نظر بگیر
+        large_numbers = [n for n in numbers if n > 100000]
+        if large_numbers:
+            large_numbers.sort(reverse=True)
+            # میانگین ۳ عدد بزرگتر (احتمالاً قیمت طلا)
+            probable_price = sum(large_numbers[:3]) / len(large_numbers[:3])
             return probable_price
     
     raise PriceFetchError(
@@ -158,13 +171,13 @@ def fetch_ounce_price() -> float:
         soup.select_one(".gold-price .price"),
         soup.select_one("#goldPrice"),
         soup.select_one(".xau-price"),
+        soup.select_one("[data-price]"),  # اضافه شده
     ]
     
     for tag in candidates:
         if tag and tag.get_text(strip=True):
             text = tag.get_text(strip=True)
             try:
-                # قیمت معمولاً به صورت "۲۴۰۰.۵۰" است
                 price = _parse_price_text(text)
                 if 1000 < price < 5000:  # محدوده منطقی برای اونس
                     return price
@@ -175,7 +188,7 @@ def fetch_ounce_price() -> float:
 
 
 def _fetch_ounce_from_alternative() -> float:
-    """دریافت قیمت اونس از منبع پشتیبان"""
+    """دریافت قیمت اونس از منبع پشتیبان (بدون تغییر در منبع اصلی)"""
     alt_url = "https://api.gold-api.com/price/XAU"
     try:
         response = requests.get(alt_url, headers=HEADERS, timeout=10)
@@ -223,12 +236,16 @@ def get_gold_18k_price() -> float:
     """
     قیمت لحظه‌ای طلای ۱۸ عیار (تومان به ازای هر گرم) را برمی‌گرداند.
     در صورت بروز خطا، PriceFetchError raise می‌شود.
+    
+    توجه: خروجی به تومان است (نه ریال)
     """
     if USE_MOCK_PRICE:
         return _fetch_mock_price()
 
     try:
-        return _fetch_from_tgju()
+        price_rial = _fetch_from_tgju()
+        # تبدیل ریال به تومان
+        return price_rial / 10
     except PriceFetchError:
         raise
     except Exception as exc:
@@ -236,7 +253,7 @@ def get_gold_18k_price() -> float:
 
 
 def get_dollar_price() -> float:
-    """دریافت قیمت لحظه‌ای دلار آزاد"""
+    """دریافت قیمت لحظه‌ای دلار آزاد (تومان)"""
     if USE_MOCK_PRICE:
         return _fetch_mock_dollar()
     
@@ -248,8 +265,31 @@ def get_dollar_price() -> float:
         raise PriceFetchError(f"خطا در دریافت قیمت دلار: {exc}") from exc
 
 
+def get_dollar_with_change() -> Tuple[float, float]:
+    """
+    دریافت قیمت دلار و تغییرات درصدی نسبت به قیمت قبلی
+    
+    Returns:
+        tuple: (price, change_percent)
+    """
+    global _dollar_history
+    
+    price = get_dollar_price()
+    change = 0
+    
+    if _dollar_history:
+        prev = _dollar_history[-1]
+        change = ((price - prev) / prev) * 100
+    
+    _dollar_history.append(price)
+    if len(_dollar_history) > 100:
+        _dollar_history.pop(0)
+    
+    return price, change
+
+
 def get_ounce_price() -> float:
-    """دریافت قیمت لحظه‌ای اونس جهانی"""
+    """دریافت قیمت لحظه‌ای اونس جهانی (دلار)"""
     if USE_MOCK_PRICE:
         return _fetch_mock_ounce()
     
@@ -259,6 +299,29 @@ def get_ounce_price() -> float:
         raise
     except Exception as exc:
         raise PriceFetchError(f"خطا در دریافت قیمت اونس: {exc}") from exc
+
+
+def get_ounce_with_change() -> Tuple[float, float]:
+    """
+    دریافت قیمت اونس و تغییرات درصدی نسبت به قیمت قبلی
+    
+    Returns:
+        tuple: (price, change_percent)
+    """
+    global _ounce_history
+    
+    price = get_ounce_price()
+    change = 0
+    
+    if _ounce_history:
+        prev = _ounce_history[-1]
+        change = ((price - prev) / prev) * 100
+    
+    _ounce_history.append(price)
+    if len(_ounce_history) > 100:
+        _ounce_history.pop(0)
+    
+    return price, change
 
 
 def get_all_prices() -> Dict[str, float]:
@@ -305,6 +368,61 @@ def get_all_prices() -> Dict[str, float]:
     return results
 
 
+def get_all_prices_with_change() -> Dict[str, Any]:
+    """
+    دریافت همزمان همه قیمت‌ها همراه با تغییرات درصدی
+    
+    Returns:
+        dict: {
+            'gold_18k': float,
+            'gold_18k_change': float,
+            'dollar': float,
+            'dollar_change': float,
+            'ounce': float,
+            'ounce_change': float,
+        }
+    """
+    if USE_MOCK_PRICE:
+        return {
+            'gold_18k': _fetch_mock_price(),
+            'gold_18k_change': random.uniform(-2, 2),
+            'dollar': _fetch_mock_dollar(),
+            'dollar_change': random.uniform(-1, 1),
+            'ounce': _fetch_mock_ounce(),
+            'ounce_change': random.uniform(-0.5, 0.5),
+        }
+    
+    results = {
+        'gold_18k': 0,
+        'gold_18k_change': 0,
+        'dollar': 0,
+        'dollar_change': 0,
+        'ounce': 0,
+        'ounce_change': 0,
+    }
+    
+    # دریافت طلا
+    try:
+        results['gold_18k'] = get_gold_18k_price()
+        # تغییرات طلا از storage گرفته میشه (در main.py)
+    except:
+        pass
+    
+    # دریافت دلار با تغییرات
+    try:
+        results['dollar'], results['dollar_change'] = get_dollar_with_change()
+    except:
+        pass
+    
+    # دریافت اونس با تغییرات
+    try:
+        results['ounce'], results['ounce_change'] = get_ounce_with_change()
+    except:
+        pass
+    
+    return results
+
+
 # ============================================
 # تست
 # ============================================
@@ -315,7 +433,7 @@ if __name__ == "__main__":
     
     try:
         gold = get_gold_18k_price()
-        print(f"💰 طلای ۱۸ عیار: {gold/10:,.0f} تومان")
+        print(f"💰 طلای ۱۸ عیار: {gold:,.0f} تومان")
     except PriceFetchError as e:
         print(f"❌ خطا: {e}")
     
@@ -331,7 +449,10 @@ if __name__ == "__main__":
     except PriceFetchError as e:
         print(f"❌ خطا: {e}")
     
-    print("\n📋 همه قیمت‌ها با هم:")
-    all_prices = get_all_prices()
-    for key, value in all_prices.items():
-        print(f"  {key}: {value}")
+    print("\n📋 همه قیمت‌ها با تغییرات:")
+    all_data = get_all_prices_with_change()
+    for key, value in all_data.items():
+        if "change" in key:
+            print(f"  {key}: {value:+.2f}%")
+        else:
+            print(f"  {key}: {value:,.2f}")
