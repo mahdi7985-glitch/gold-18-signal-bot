@@ -1,6 +1,6 @@
 import sys
 from datetime import datetime
-from typing import Optional, Dict, Any  # ← اضافه شد
+from typing import Optional, Dict, Any
 import pandas as pd
 
 from config import (
@@ -108,8 +108,9 @@ def format_full_report(
     jalali = get_jalali_now()
     day_name = get_iran_day()
     
-    # ===== قیمت‌ها =====
-    price_toman = price / 10
+    # ===== قیمت‌ها (اصلاح شده) =====
+    # قیمت از قبل به تومان هست، دیگه تقسیم بر ۱۰ نمی‌کنیم
+    price_toman = price
     
     # ===== تاریخچه قیمت =====
     recent_prices = get_recent_prices(5)
@@ -335,7 +336,7 @@ def fetch_and_send_report(chat_id: Optional[str] = None) -> Dict[str, bool]:
         print(f"[ERROR] دریافت قیمت ناموفق بود: {exc}", file=sys.stderr)
         return {"telegram": False, "bale": False}
 
-    print(f"[INFO] قیمت دریافت‌شده: {price/10:,.0f} تومان")
+    print(f"[INFO] قیمت دریافت‌شده: {price:,.0f} تومان")
 
     # دریافت دلار و انس
     all_data = get_all_prices_with_change()
