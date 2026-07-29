@@ -42,12 +42,22 @@ def append_price(price: float, timestamp: Optional[datetime] = None) -> None:
     from zoneinfo import ZoneInfo
     iran_time = timestamp.astimezone(ZoneInfo("Asia/Tehran"))
     
-    # 🔧 اصلاح: تبدیل تومان به ریال برای ذخیره (هماهنگی با تاریخچه قدیمی)
-    price_rial = price * 10
+    # قیمت رو به ریال تبدیل کن (ضربدر ۱۰)
+    price_rial = int(price * 10)
+    
+    # بررسی امنیتی: اگر قیمت بیش از ۵ میلیارد ریال بود، یعنی اشتباه شده
+    if price_rial > 5_000_000_000:
+        print(f"⚠️ قیمت غیرعادی: {price_rial:,.0f} ریال")
+        print("   احتمالاً قیمت به ریال وارد شده، اصلاح می‌شود...")
+        price_rial = int(price)  # اگر قبلاً ریال بوده، دیگه ضربدر ۱۰ نکن
+        
+        # باز هم چک کن
+        if price_rial > 5_000_000_000:
+            price_rial = int(price / 10)  # اگر بازم زیاد بود، تقسیم بر ۱۰ کن
     
     row = pd.DataFrame([{
         "timestamp": iran_time.isoformat(),
-        "price": price_rial  # ذخیره به ریال
+        "price": price_rial
     }])
 
     if os.path.exists(HISTORY_FILE):
@@ -90,7 +100,7 @@ def get_previous_price() -> Optional[float]:
     history = load_history()
     if len(history) < 2:
         return None
-    # 🔧 تبدیل ریال به تومان
+    # تبدیل ریال به تومان
     return history["price"].iloc[-2] / 10
 
 
@@ -104,7 +114,7 @@ def get_last_price() -> Optional[float]:
     history = load_history()
     if history.empty:
         return None
-    # 🔧 تبدیل ریال به تومان
+    # تبدیل ریال به تومان
     return history["price"].iloc[-1] / 10
 
 
@@ -121,7 +131,7 @@ def get_price_by_index(index: int = -1) -> Optional[float]:
     history = load_history()
     if len(history) < abs(index):
         return None
-    # 🔧 تبدیل ریال به تومان
+    # تبدیل ریال به تومان
     return history["price"].iloc[index] / 10
 
 
@@ -215,13 +225,25 @@ def get_recent_prices(days: int = 5) -> List[float]:
     """
     history = load_history()
     if history.empty:
-        return []
+        return [0] * days
     
     # گرفتن آخرین 'days' قیمت
     recent = history["price"].iloc[-days:] if len(history) >= days else history["price"]
     
-    # تبدیل ریال به تومان
-    return [price / 10 for price in recent.tolist()]
+    # تبدیل ریال به تومان و حذف مقادیر غیرعادی
+    prices = []
+    for price_val in recent.tolist():
+        # اگر قیمت بیش از ۵ میلیارد ریال بود، یعنی اشتباه شده
+        if price_val > 5_000_000_000:
+            print(f"⚠️ قیمت غیرعادی در تاریخچه: {price_val:,.0f} ریال (رد شد)")
+            continue
+        prices.append(price_val / 10)  # تبدیل به تومان
+    
+    # اگه تعداد قیمت‌ها کمتر از days هست، با ۰ پر کن
+    while len(prices) < days:
+        prices.insert(0, 0)
+    
+    return prices
 
 
 def get_weekly_trend() -> Dict[str, Any]:
