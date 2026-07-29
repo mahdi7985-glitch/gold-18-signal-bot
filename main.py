@@ -131,6 +131,11 @@ def format_full_report(
     
     # ===== تاریخچه قیمت =====
     recent_prices = get_recent_prices(5)
+    
+    # 🔥 اصلاح: جایگزینی قیمت امروز با قیمت واقعی
+    if recent_prices and len(recent_prices) > 0:
+        recent_prices[0] = price  # قیمت لحظه‌ای رو جایگزین کن
+    
     weekly_trend_data = get_weekly_trend()
     
     # ===== تغییرات =====
