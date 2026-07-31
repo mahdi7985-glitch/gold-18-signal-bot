@@ -1,6 +1,6 @@
 import sys
 from datetime import datetime
-from typing import Optional, Dict, Any  # ← این خط حتماً باید باشه
+from typing import Optional, Dict, Any
 import pandas as pd
 import os
 
@@ -129,12 +129,17 @@ def format_full_report(
     # ===== قیمت‌ها =====
     price_toman = price
     
-    # ===== تاریخچه قیمت =====
-    recent_prices = get_recent_prices(5)
+    # ===== تاریخچه قیمت (دریافت از فایل) =====
+    history = load_history()
+    if len(history) >= 5:
+        # ۵ قیمت آخر رو بگیر (به تومان)
+        recent_prices = [p / 10 for p in history["price"].iloc[-5:].tolist()]
+    else:
+        recent_prices = [0] * 5
     
-    # 🔥 اصلاح: جایگزینی قیمت امروز با قیمت واقعی
+    # قیمت امروز رو با قیمت لحظه‌ای جایگزین کن
     if recent_prices and len(recent_prices) > 0:
-        recent_prices[0] = price  # قیمت لحظه‌ای رو جایگزین کن
+        recent_prices[-1] = price  # آخرین آیتم = امروز
     
     weekly_trend_data = get_weekly_trend()
     
@@ -143,6 +148,7 @@ def format_full_report(
     advice = "🤔 امروز تازه شروع کردیم، بذار چند روز بگذره تا روند مشخص بشه."
     trend_emoji = "⚪"
     trend_word = "ثابت"
+    change_amount = 0
     
     if previous_price is not None and previous_price > 0:
         prev_toman = previous_price
@@ -179,12 +185,10 @@ def format_full_report(
     history_text = ""
     if SHOW_HISTORY and len(recent_prices) >= 2:
         history_text = "\n📅 قیمت‌های اخیر:\n"
-        labels = ["امروز", "دیروز", "پریروز", "۳ روز پیش", "۴ روز پیش", "۵ روز پیش"]
+        labels = ["۴ روز پیش", "۳ روز پیش", "پریروز", "دیروز", "امروز"]
         for i, (label, price_val) in enumerate(zip(labels, recent_prices)):
-            if i == 0:
+            if price_val > 0:
                 history_text += f"• {label}: {price_val:,.0f} تومان\n"
-            elif i < len(recent_prices):
-                history_text += f"• {label}: {recent_prices[i]:,.0f} تومان\n"
     
     # ===== روند هفتگی =====
     weekly_text = ""
@@ -282,6 +286,7 @@ def format_full_report(
     if SHOW_LEVELS and support and resistance:
         dist_to_support = ((price - support) / price) * 100
         dist_to_resistance = ((resistance - price) / price) * 100
+        dist_to_support2 = ((price - support2) / price) * 100 if support2 else 0
         
         message += f"""
 ━━━━━━━━━━━━━━━━━━━━
@@ -289,7 +294,7 @@ def format_full_report(
 
 اگه بره پایین‌تر:
 🛡️ **حمایت اول:** {support:,.0f} تومان ({dist_to_support:.1f}% پایین‌تر)
-🛡️ **حمایت دوم:** {support2:,.0f} تومان ({dist_to_support - 2:.1f}% پایین‌تر)
+🛡️ **حمایت دوم:** {support2:,.0f} تومان ({dist_to_support2:.1f}% پایین‌تر)
 
 اگه برگرده بالا:
 🚀 **مقاومت اول:** {resistance:,.0f} تومان ({dist_to_resistance:.1f}% بالاتر)
